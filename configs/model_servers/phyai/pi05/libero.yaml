@@ -1,0 +1,44 @@
+# PhyAI pi0.5 model server — LIBERO config (FP / QVLA / differentiable).
+#
+# Optional modes (independent flags, default off):
+#   * `qvla_pack_path` — load a W4A4 pack (build via qvla/scripts/build_pi05_pack.py).
+#   * `use_differentiable_forward` — use qvla's differentiable_step path instead of
+#     phyai's non-differentiable scheduler.step. Requires `reproducible: true`
+#     (or otherwise use_cuda_graph=False).
+#   * `reproducible` — length-dummy pad + seed/deterministic (see pi05-phyai.py).
+#     `noise_mode` (required): random | global | episode.
+#     `use_cuda_graph: false` is required only when
+#     `flashinfer_disable_split_kv` is enabled inside the reproducible branch.
+#
+# Build a QVLA pack first via:
+#   python /phyai_workspace/qvla/scripts/build_pi05_pack.py \
+#       --checkpoint /data/share/pi05-libero \
+#       --output    /data/share/packs/pi05_libero_object_W4A4.pt \
+#       --num-samples 16
+
+script: "./src/vla_eval/model_servers/pi05-phyai.py"
+args:
+  # checkpoint_path: "/data/share/pi05-libero"
+  checkpoint_path: "/data/share/pi05_libero_finetuned_v044"
+  # qvla_pack_path: "/data/share/pi05-libero-packs/pi05-libero-W4A4-llm_rotation_none-llm_enable_permute_False-llm_perm_score_act-llm_svd_source_activation-dit_weight_quantizer_gptq-dit_rotation_none-dit_enable_permute_False-dit_perm_score_act-dit_svd_source_activation-calfile.pt"
+  # qvla_pack_path: "/data/share/pi05_libero_finetuned_v044-packs/pi05_libero_finetuned_v044-W4A4-ns10-k8-calfile_goal-newperm-dit_gptq-dit_dynamic-pipeline_hadamard-test4.pt"
+  use_differentiable_forward: False
+  use_eager_attention: False
+  reproducible: True
+  # random = scheduler torch.randn; global = one fixed noise; episode = per-episode hash.
+  noise_mode: "global"
+  device: "cuda"
+  params_dtype: "bfloat16"
+  vision_params_dtype: "float16"
+  attn_backend: "flashinfer"
+  norm_backend: "phyai-kernel"
+  linear_backend: "torch"
+  use_cuda_graph: True
+  # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
+  # for the length-dummy pad, so business max_batch_size becomes this - 1.
+  max_batch_size: 8
+  strict_pack_match: True
+  chunk_size: 50
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8002

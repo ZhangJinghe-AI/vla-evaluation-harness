@@ -1,9 +1,10 @@
 # LIBERO Object suite (10 tasks × 50 episodes)
 server:
-  url: "ws://localhost:8000"
+  url: "ws://localhost:8002"
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+  gpus: "1,4,5"
 
 output_dir: "./results"
 
@@ -15,4 +16,5 @@ benchmarks:
       suite: libero_object
       seed: 7
       num_steps_wait: 10
+      # max_steps: 400
 

@@ -1,9 +1,10 @@
 # LIBERO Goal suite (10 tasks × 50 episodes)
 server:
-  url: "ws://localhost:8000"
+  url: "ws://localhost:8002"
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+  gpus: "0,1,4,5"
 
 output_dir: "./results"
 

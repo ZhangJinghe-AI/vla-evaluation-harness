@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from vla_eval.cli.export_calibration import cmd_export_calibration
 from vla_eval.cli._console import stderr_console as _stderr_console
 from vla_eval.cli._docker import (
     check_docker_daemon as _check_docker_daemon,
@@ -785,6 +786,53 @@ Bool args become flags (--use_text_template), others become --key value.
     )
     serve_parser.add_argument("--verbose", "-v", action="store_true")
     serve_parser.set_defaults(func=cmd_serve)
+
+    # export-calibration command
+    export_parser = sub.add_parser(
+        "export-calibration",
+        help="Export benchmark observations for offline calibration (.npz)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Exports LIBERO reset observations for downstream quantizers (e.g. QVLA).
+
+By default runs inside the LIBERO Docker image (no local ``libero`` install needed).
+Use ``--no-docker`` when LIBERO is already installed in the current environment.
+
+examples:
+# From vla-evaluation-harness checkout (recommended):
+uv run vla-eval export-calibration \\
+--suite libero_object --num-samples 16 --seed 7 \\
+-o ../calibration_data/libero_object_16_7.npz
+
+# Force local export (LIBERO must be importable):
+uv run vla-eval export-calibration --no-docker -o ./calib.npz
+
+# Mount local src/ into the container while developing:
+uv run vla-eval export-calibration --dev -o ../calibration_data/calib.npz
+""",
+    )
+    export_parser.add_argument("--benchmark", choices=("libero",), default="libero")
+    export_parser.add_argument("--output", "-o", required=True)
+    export_parser.add_argument("--num-samples", type=int, default=16)
+    export_parser.add_argument("--suite", default="libero_object")
+    export_parser.add_argument("--seed", type=int, default=7)
+    export_parser.add_argument("--env-seed", type=int, default=None)
+    export_parser.add_argument("--num-steps-wait", type=int, default=10)
+    export_parser.add_argument("--max-tasks", type=int, default=None)
+    export_parser.add_argument("--state-dim", type=int, default=8)
+    export_parser.add_argument("--no-docker", action="store_true")
+    export_parser.add_argument(
+        "--docker-image",
+        default="ghcr.io/allenai/vla-evaluation-harness/libero:latest",
+    )
+    export_parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Mount local src/ into the export container (for harness development).",
+    )
+    export_parser.add_argument("-y", "--yes", action="store_true")
+    export_parser.add_argument("--verbose", "-v", action="store_true")
+    export_parser.set_defaults(func=cmd_export_calibration)
 
     # merge command
     merge_parser = sub.add_parser(
