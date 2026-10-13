@@ -18,7 +18,7 @@
 # phyai-ext = { path = "../../../../phyai/phyai-ext", editable = true }
 # qvla = { path = "../../../../qvla", editable = true }
 # [tool.uv]
-# exclude-newer = "2026-06-22T00:00:00Z"
+# exclude-newer = "2026-08-02T00:00:00Z"
 # ///
 """PhyAI pi0.5 model server — full-precision or QVLA W4A4 quantization.
 
@@ -38,18 +38,19 @@ and the vla_eval ModelServer surface are shared.
   quantization.
 * **Differentiable forward:** set ``use_differentiable_forward=True`` to replace
   phyai's non-differentiable ``scheduler.step`` with
-  ``qvla.build.differentiable_forward`` (eager runners + autograd kernel
+  ``qvla.adapters.pi05.differentiable_forward`` (eager runners + autograd kernel
   patches). Requires ``use_cuda_graph=False``; incompatible flags raise.
 * **Eager attention:** set ``use_eager_attention=True`` to replace FlashInfer
-  with ``qvla.build.attention_grad.patch_attention_for_inference`` (batched
-  torch math via ``ragged_paged_attn_batched``). Requires ``use_cuda_graph=False``
-  (implied by ``reproducible=True``); mutually exclusive with
-  ``use_differentiable_forward``.
+  with ``qvla.adapters.pi05.attention_grad.patch_attention_for_inference``
+  (batched torch math via ``ragged_paged_attn_batched``). Requires
+  ``use_cuda_graph=False`` (implied by ``reproducible=True``); mutually exclusive
+  with ``use_differentiable_forward``.
 * **Reproducible eval:** set ``reproducible=True`` to enable
-  ``pad_length_dummy=True``, ``inference_seed=0``,
+  ``pad_length_dummy=True``, ``inference_seed`` (default ``0``),
   ``deterministic_algorithms=True``, and an explicit ``noise_mode``:
-  ``"random"`` = scheduler ``torch.randn``; ``"global"`` = one fixed noise
-  from ``inference_seed``; ``"episode"`` = per-sample
+  ``"random"`` = fresh noise from OS entropy, independent of
+  ``inference_seed``; ``"global"`` = one fixed noise from ``inference_seed``;
+  ``"episode"`` = per-sample
   ``hash(seed, task_id, episode_idx, step)``. ``noise_mode="global"`` or
   ``"episode"`` requires ``reproducible=True``.
   ``flashinfer_disable_split_kv`` is configurable inside the
@@ -103,11 +104,11 @@ from vla_eval.specs import IMAGE_RGB, LANGUAGE, RAW, DimSpec
 from vla_eval.types import Action, Observation
 
 from qvla import enable_quantization
-from qvla.build.attention_grad import (
+from qvla.adapters.pi05.attention_grad import (
     patch_attention_for_grad,
     patch_attention_for_inference,
 )
-from qvla.build.differentiable_forward import (
+from qvla.adapters.pi05.differentiable_forward import (
     differentiable_step,
     force_eager_runners,
     patch_action_heads_for_grad,
@@ -116,10 +117,33 @@ from qvla.build.differentiable_forward import (
     reset_differentiable_state,
 )
 from qvla.core.pack import Pack
+from qvla.core.quantize import warmup_fp4_cuda_tensors
 from qvla.runtime import list_replaced, reset_step_counters
 
 
 logger = logging.getLogger(__name__)
+
+# Temporary cross-process validation against pack-build calibration.
+# Resolved relative to this file: ../../../.. / calibration_data / noise
+GLOBAL_CALIBRATION_NOISE_DIR = (
+    Path(__file__).resolve().parents[4] / "calibration_data" / "noise"
+)
+
+
+def _global_calibration_noise_path(*, model: str, seed: int) -> Path:
+    model_slug = model.strip().lower()
+    if not model_slug or any(
+        c != "_" and not c.isalnum() for c in model_slug
+    ):
+        raise ValueError(
+            "model must be a non-empty alphanumeric/underscore slug, "
+            f"got {model!r}."
+        )
+    return (
+        GLOBAL_CALIBRATION_NOISE_DIR
+        / f"qvla_global_noise_{model_slug}_seed{int(seed)}.pt"
+    )
+
 
 NOISE_MODES = ("random", "global", "episode")
 
@@ -202,6 +226,7 @@ class PhyAIModelServer(PredictModelServer):
         self,
         checkpoint_path: str,
         noise_mode: str,
+        model_kind: str,
         device: str = "cuda",
         params_dtype: str = "bfloat16",
         vision_params_dtype: str = "float16",
@@ -215,6 +240,16 @@ class PhyAIModelServer(PredictModelServer):
         use_eager_attention: bool = False,
         use_differentiable_forward: bool = False,
         reproducible: bool = False,
+        inference_seed: int = 0,
+        embodiment: str | None = None,
+        openpi_norm_stats: str | None = None,
+        openpi_chunk_size: int | None = None,
+        openpi_action_dim: int | None = None,
+        openpi_state_dim: int | None = None,
+        openpi_empty_cameras: int | None = None,
+        openpi_num_inference_steps: int = 10,
+        openpi_n_action_steps: int | None = None,
+        openpi_discrete_state: bool = True,
         n_warmup: int = 3,
         n_timed_dummy: int = 3,
         n_timed_real: int = 3,
@@ -222,16 +257,38 @@ class PhyAIModelServer(PredictModelServer):
     ) -> None:
         super().__init__(**kwargs)
         self.checkpoint_path = Path(checkpoint_path)
+        self.embodiment = embodiment.strip().lower() if embodiment else ""
+        if self.embodiment not in ("", "robotwin"):
+            raise ValueError(
+                "embodiment must be robotwin or omitted, "
+                f"got {embodiment!r}."
+            )
+        self.openpi_norm_stats = openpi_norm_stats
+        self.openpi_chunk_size = openpi_chunk_size
+        self.openpi_action_dim = openpi_action_dim
+        self.openpi_state_dim = openpi_state_dim
+        self.openpi_empty_cameras = openpi_empty_cameras
+        self.openpi_num_inference_steps = openpi_num_inference_steps
+        self.openpi_n_action_steps = openpi_n_action_steps
+        self.openpi_discrete_state = bool(openpi_discrete_state)
+        self.model_kind = model_kind.strip().lower()
+        if not self.model_kind or any(
+            c != "_" and not c.isalnum() for c in self.model_kind
+        ):
+            raise ValueError(
+                "model_kind must be a non-empty alphanumeric/underscore slug, "
+                f"got {model_kind!r}."
+            )
         self.device = device
         self.params_dtype = _DTYPE_MAP[params_dtype]
         self.vision_params_dtype = _DTYPE_MAP[vision_params_dtype]
         self.use_cuda_graph = bool(use_cuda_graph)
         # Bundled by ``reproducible`` (toggle individually inside the branch
         # for ablations):
-        #   True  -> length-dummy pad, seed=0, deterministic_algorithms
-        #   False -> defaults (no pad)
+        #   True  -> length-dummy pad, inference_seed, deterministic_algorithms
+        #   False -> defaults (no pad, inference_seed ignored)
         # ``noise_mode`` selects flow-matching noise:
-        #   random  -> scheduler torch.randn
+        #   random  -> fresh noise from OS entropy, independent of inference_seed
         #   global  -> one fixed noise from inference_seed
         #   episode -> hash(seed, task_id, episode_idx, step) per sample
         # flashinfer_disable_split_kv is set in the reproducible branch below.
@@ -253,7 +310,12 @@ class PhyAIModelServer(PredictModelServer):
                 )
             self.flashinfer_disable_split_kv = False
             self.pad_length_dummy = True
-            self.inference_seed: int | None = 0
+            if type(inference_seed) is not int:
+                raise ValueError(
+                    "inference_seed must be an int, "
+                    f"got {inference_seed!r}."
+                )
+            self.inference_seed: int | None = inference_seed
             self.deterministic_algorithms = True
             self.max_batch_size = max_batch_size - 1
         else:
@@ -337,11 +399,12 @@ class PhyAIModelServer(PredictModelServer):
         processor._postprocessor.steps = [*slice_steps, *core_steps]
 
     def _make_dummy_obs(self) -> dict[str, Any]:
+        images = {
+            f"image_{index}": np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8)
+            for index in range(self._num_real_cameras)
+        }
         return {
-            "images": {
-                "image": np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
-                "wrist_image": np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
-            },
+            "images": images,
             "states": np.random.randn(self._state_dim).astype(np.float32),
             "task_description": "pad " * self._tokenizer_max_length,
         }
@@ -365,7 +428,14 @@ class PhyAIModelServer(PredictModelServer):
 
     def _obs_to_transition(self, obs: dict[str, Any]) -> dict[str, Any]:
         cameras: list[torch.Tensor] = []
-        for img in obs.get("images", {}).values():
+        images = list(obs.get("images", {}).values())
+        # OpenPI pi0.5 always has 3 camera token slots. Checkpoints trained with
+        # an empty third camera (CALVIN) need that slot present so language
+        # tokens stay at the positions the model was trained with. Pad with black.
+        if images and len(images) < self._num_real_cameras:
+            blank = np.zeros_like(np.asarray(images[0]))
+            images = [*images, *([blank] * (self._num_real_cameras - len(images)))]
+        for img in images[: self._num_real_cameras]:
             arr = np.ascontiguousarray(img)
             cameras.append(
                 torch.as_tensor(arr, dtype=torch.float32)
@@ -431,6 +501,18 @@ class PhyAIModelServer(PredictModelServer):
             dtype=torch.float32,
         )
 
+    def _sample_noise_from_unseed(self, batch_size: int) -> torch.Tensor:
+        """Sample FM noise from OS entropy without consuming global RNG state."""
+        gen = torch.Generator(device="cpu")
+        gen.manual_seed(int.from_bytes(os.urandom(8), "little"))
+        return torch.randn(
+            batch_size,
+            self._model_chunk_size,
+            self._max_action_dim,
+            generator=gen,
+            dtype=torch.float32,
+        )
+
     @staticmethod
     def _episode_noise_seed(
         base_seed: int, task_id: int, episode_idx: int, step: int
@@ -440,15 +522,8 @@ class PhyAIModelServer(PredictModelServer):
         digest = hashlib.sha256(payload.encode("utf-8")).digest()
         return int.from_bytes(digest[:8], "little") % (2**31)
 
-    def _make_noise(self, batch_size: int) -> torch.Tensor | None:
-        """Global fixed flow-matching noise, or None to keep scheduler sampling.
-
-        * ``noise_mode="global"``: one sample from ``inference_seed``, expand
-          to ``batch_size``.
-        * ``noise_mode="random"``: return None (scheduler ``torch.randn``).
-        """
-        if self.noise_mode == "random":
-            return None
+    def _make_noise(self, batch_size: int) -> torch.Tensor:
+        """Expand one globally seeded flow-matching noise across the batch."""
         if self.noise_mode == "episode":
             raise ValueError(
                 "_make_noise() is the global-noise path; with "
@@ -460,6 +535,33 @@ class PhyAIModelServer(PredictModelServer):
                 "(got inference_seed=None)."
             )
         noise = self._sample_noise_from_seed(int(self.inference_seed))
+        # Temporary cross-process validation against pack-build calibration.
+        if not getattr(self, "_global_noise_validation_done", False):
+            path = _global_calibration_noise_path(
+                model=self.model_kind, seed=int(self.inference_seed)
+            )
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Global calibration noise file not found: {path}"
+                )
+            calibration_noise = torch.load(
+                path,
+                map_location="cpu",
+                weights_only=True,
+            )
+            if not torch.equal(noise, calibration_noise):
+                raise RuntimeError(
+                    "Model-server global noise differs from saved calibration "
+                    f"noise at {path} "
+                    f"(server={tuple(noise.shape)}/{noise.dtype}, "
+                    f"calibration={tuple(calibration_noise.shape)}/"
+                    f"{calibration_noise.dtype})."
+                )
+            logger.info(
+                "Global noise exactly matches saved calibration noise: %s",
+                path,
+            )
+            self._global_noise_validation_done = True
         return noise.expand(batch_size, -1, -1).contiguous()
 
     def _make_episode_bound_noise(
@@ -500,10 +602,10 @@ class PhyAIModelServer(PredictModelServer):
 
     def _resolve_noise(
         self, ctx_batch: list[SessionContext], n_total: int
-    ) -> torch.Tensor | None:
-        """Select global / episode-bound / scheduler noise for a batch."""
+    ) -> torch.Tensor:
+        """Select OS-random, global, or episode-bound noise for a batch."""
         if self.noise_mode == "random":
-            return None
+            return self._sample_noise_from_unseed(n_total)
         if self.noise_mode == "episode":
             return self._make_episode_bound_noise(ctx_batch, n_total)
         return self._make_noise(n_total)
@@ -742,6 +844,7 @@ class PhyAIModelServer(PredictModelServer):
             "Recapturing CUDA graphs after QVLA swap on: %s",
             ", ".join(active_runners),
         )
+        warmup_fp4_cuda_tensors(get_engine_config().device.target)
         sched.setup()
 
     def _apply_qvla(self) -> None:
@@ -756,6 +859,7 @@ class PhyAIModelServer(PredictModelServer):
             self._engine.entry.model,
             pack,
             strict=self.strict_pack_match,
+            nvfp_activation_num_samples=self._engine_max_batch_size,
         )
         n_live = sum(1 for _ in list_replaced(self._engine.entry.model))
         logger.info(
@@ -842,6 +946,20 @@ class PhyAIModelServer(PredictModelServer):
         if self._engine is not None:
             return
 
+        from vla_eval.model_servers.pi05_openpi import prepare_pi05_checkpoint
+
+        self.checkpoint_path = prepare_pi05_checkpoint(
+            self.checkpoint_path,
+            norm_stats=self.openpi_norm_stats,
+            chunk_size=self.openpi_chunk_size,
+            action_dim=self.openpi_action_dim,
+            state_dim=self.openpi_state_dim,
+            empty_cameras=self.openpi_empty_cameras,
+            num_inference_steps=self.openpi_num_inference_steps,
+            n_action_steps=self.openpi_n_action_steps,
+            discrete_state_input=self.openpi_discrete_state,
+        )
+
         if self.inference_seed is not None:
             self._seed_rng()
         if self.deterministic_algorithms:
@@ -901,39 +1019,79 @@ class PhyAIModelServer(PredictModelServer):
     def get_observation_spec(self) -> dict[str, DimSpec]:
         return {"image": IMAGE_RGB, "state": RAW, "language": LANGUAGE}
 
+    def _fit_state(self, raw_state: Any) -> np.ndarray:
+        state = np.asarray(raw_state, dtype=np.float32).reshape(-1)
+        dim = self._state_dim
+        if state.size == dim:
+            return state
+        if state.size > dim:
+            return np.ascontiguousarray(state[:dim])
+        fitted = np.zeros(dim, dtype=np.float32)
+        fitted[: state.size] = state
+        return fitted
+
     def _observation_to_phyai_obs(self, obs: Observation) -> dict[str, Any]:
         images_dict = obs.get("images", {})
-        img_list = list(images_dict.values()) if isinstance(images_dict, dict) else []
+        if not isinstance(images_dict, dict):
+            images_dict = {}
 
-        image = (
-            np.asarray(img_list[0], dtype=np.uint8)
-            if len(img_list) > 0
-            else np.zeros((256, 256, 3), dtype=np.uint8)
-        )
-        wrist_image = (
-            np.asarray(img_list[1], dtype=np.uint8)
-            if len(img_list) > 1
-            else np.zeros_like(image)
-        )
-        raw_state = obs.get("states", obs.get("state", np.zeros(self._state_dim)))
+        # Prefer named camera keys so left/right wrists cannot silently swap if
+        # make_obs insertion order changes. RoboTwin/Motus train as
+        # high → left_wrist → right_wrist (= image_0/1/2 with empty_cameras=0).
+        if self.embodiment == "robotwin":
+            preferred = ("head_camera", "left_camera", "right_camera")
+            frames = [
+                np.asarray(images_dict[key], dtype=np.uint8)
+                for key in preferred
+                if key in images_dict
+            ]
+        else:
+            frames = [np.asarray(image, dtype=np.uint8) for image in images_dict.values()]
+
+        if not frames:
+            frames = [np.zeros((self._image_size, self._image_size, 3), dtype=np.uint8)]
+        while len(frames) < self._num_real_cameras:
+            frames.append(np.zeros_like(frames[0]))
+        frames = frames[: self._num_real_cameras]
+
+        raw_state = obs.get("states", obs.get("state", obs.get("joint_state")))
+        if raw_state is None:
+            raw_state = np.zeros(self._state_dim, dtype=np.float32)
+        state = self._fit_state(raw_state)
+        if self.embodiment == "robotwin":
+            from vla_eval.model_servers.embodiment_adapt import robotwin_state_to_pi
+
+            state = robotwin_state_to_pi(state)
 
         return {
-            "images": {
-                "image": image,
-                "wrist_image": wrist_image,
-            },
-            "states": np.asarray(raw_state, dtype=np.float32),
+            "images": {f"image_{index}": frame for index, frame in enumerate(frames)},
+            "states": state,
             "task_description": obs.get("task_description", ""),
         }
+
+    def _apply_embodiment_actions(
+        self, actions: np.ndarray, phyai_obs_list: list[dict[str, Any]]
+    ) -> np.ndarray:
+        if self.embodiment != "robotwin":
+            return actions
+        from vla_eval.model_servers.embodiment_adapt import robotwin_pi_actions_to_env
+
+        out = np.array(actions, copy=True)
+        for index, phyai_obs in enumerate(phyai_obs_list):
+            out[index] = robotwin_pi_actions_to_env(out[index], phyai_obs["states"])
+        return out
 
     def predict(self, obs: Observation, ctx: SessionContext) -> Action:
         self._load_model()
         assert self._processor is not None and self._engine is not None
 
+        phyai_obs = self._observation_to_phyai_obs(obs)
         noise = self._resolve_noise([ctx], 1)
-        request = self._build_request(self._observation_to_phyai_obs(obs), noise=noise)
+        request = self._build_request(phyai_obs, noise=noise)
         raw_actions = self._engine_step_timed(request)
-        real_actions = self._decode_actions(raw_actions)
+        real_actions = self._apply_embodiment_actions(
+            self._decode_actions(raw_actions), [phyai_obs]
+        )
 
         logger.info("real_actions shape: %s", real_actions.shape)
         return {"actions": real_actions[0]}
@@ -947,13 +1105,14 @@ class PhyAIModelServer(PredictModelServer):
             raise ValueError(
                 f"obs_batch/ctx_batch length mismatch: {n_real} vs {len(ctx_batch)}"
             )
-        phyai_obs_list = self._pad_obs_with_length_dummy(
-            [self._observation_to_phyai_obs(obs) for obs in obs_batch]
-        )
+        real_obs = [self._observation_to_phyai_obs(obs) for obs in obs_batch]
+        phyai_obs_list = self._pad_obs_with_length_dummy(real_obs)
         noise = self._resolve_noise(ctx_batch, len(phyai_obs_list))
         request = self._build_batch_request(phyai_obs_list, noise=noise)
         raw_actions = self._engine_step_timed(request)
-        real_actions = self._decode_actions(raw_actions)
+        real_actions = self._apply_embodiment_actions(
+            self._decode_actions(raw_actions), real_obs
+        )
 
         logger.info(
             "batch real_actions shape: %s (business_B=%d, engine_B=%d, pad_length_dummy=%s)",

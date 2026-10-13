@@ -1,11 +1,13 @@
 # LIBERO-10 suite — replan_step=15
 server:
-  url: "ws://localhost:8000"
+  url: "ws://localhost:8004"
+  timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+  gpus: "0,1,2,3,4"
 
-output_dir: "./results"
+output_dir: "./results_10"
 
 benchmarks:
   - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"

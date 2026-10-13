@@ -216,6 +216,17 @@ class Orchestrator:
         else:
             runner = SyncEpisodeRunner()
 
+        rollout_recorder = None
+        rollout_dir = self.config.get("rollout_dir")
+        if rollout_dir:
+            if cfg.mode.startswith("realtime"):
+                logger.warning("rollout_dir is ignored in realtime mode: %s", rollout_dir)
+            else:
+                from vla_eval.calibration.rollout import RolloutRecorder
+
+                rollout_recorder = RolloutRecorder(rollout_dir)
+                logger.info("Saving FP rollouts to %s", rollout_recorder.output_dir)
+
         # Get tasks
         tasks = benchmark.get_tasks()
         if cfg.tasks:
@@ -262,7 +273,12 @@ class Orchestrator:
                     if cfg.throughput_mode and max_ep is not None:
                         episode_idx = ep % max_ep
                     task = {**task, "episode_idx": episode_idx}
-                    raw = await runner.run_episode(benchmark, task, conn, max_steps=max_steps)
+                    run_kwargs: dict[str, Any] = {}
+                    if rollout_recorder is not None:
+                        run_kwargs["rollout_recorder"] = rollout_recorder
+                    raw = await runner.run_episode(
+                        benchmark, task, conn, max_steps=max_steps, **run_kwargs
+                    )
                     raw["episode_id"] = ep
                     ep_result = cast(EpisodeResult, raw)
                     collector.record(task_name, ep_result)

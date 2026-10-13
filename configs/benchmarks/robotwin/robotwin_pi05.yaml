@@ -1,0 +1,22 @@
+# Smoke: 5 episodes of one task. Raise test_num after the success rate looks alive.
+server:
+  url: "ws://localhost:8016"
+  timeout: 120.0
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/robotwin:latest
+  gpus: "0,1,2,3,4"
+
+output_dir: "./results_robotwin_pi05"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.robotwin.benchmark:RoboTwinBenchmark"
+    episodes_per_task: 1
+    params:
+      task_name: grab_roller
+      task_config: demo_clean
+      seed: 0
+      instruction_type: seen
+      test_num: 5
+      skip_expert_check: true
+    action_dim: 14

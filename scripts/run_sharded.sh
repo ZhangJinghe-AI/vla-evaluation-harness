@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") -c <config> [-n <num_shards>] [-o <output>]
+Usage: $(basename "$0") -c <config> [-n <num_shards>] [-o <output>] [-d]
 
 Run a benchmark in parallel shards and merge results.
 
@@ -11,6 +11,7 @@ Options:
   -c <config>       Config YAML file (required)
   -n <num_shards>   Number of shards (default: 50)
   -o <output>       Output file for merged results (default: results/<config_name>.json)
+  -d                 Mount local harness src/ into benchmark containers
   -h                Show this help
 EOF
   exit "${1:-0}"
@@ -19,12 +20,14 @@ EOF
 CONFIG=""
 NUM_SHARDS=50
 OUTPUT=""
+DEV=false
 
-while getopts "c:n:o:h" opt; do
+while getopts "c:n:o:dh" opt; do
   case "$opt" in
     c) CONFIG="$OPTARG" ;;
     n) NUM_SHARDS="$OPTARG" ;;
     o) OUTPUT="$OPTARG" ;;
+    d) DEV=true ;;
     h) usage 0 ;;
     *) usage 1 ;;
   esac
@@ -90,8 +93,12 @@ fi
 echo "Launching ${NUM_SHARDS} shards..."
 
 pids=()
+dev_args=()
+if [[ "$DEV" == true ]]; then
+  dev_args+=(--dev)
+fi
 for i in $(seq 0 $((NUM_SHARDS - 1))); do
-  vla-eval run -c "$CONFIG" --shard-id "$i" --num-shards "$NUM_SHARDS" &
+  vla-eval run -c "$CONFIG" "${dev_args[@]}" --shard-id "$i" --num-shards "$NUM_SHARDS" &
   pids+=($!)
 done
 

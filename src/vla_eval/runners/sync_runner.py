@@ -32,26 +32,41 @@ class SyncEpisodeRunner(EpisodeRunner):
         conn: Any,  # Connection
         *,
         max_steps: int | None = None,
+        rollout_recorder: Any = None,
     ) -> EpisodeResult:
         """Run a synchronous episode."""
-        await benchmark.start_episode(task)
-        obs_dict = await benchmark.get_observation()
-
-        # Send only serializable task info to the model server
-        task_info = {k: v for k, v in task.items() if isinstance(v, (str, int, float, bool, list))}
-        await conn.start_episode({"task": task_info})
-
-        steps = range(max_steps) if max_steps is not None else itertools.count()
-        for step in steps:
-            action = await conn.act(obs_dict)
-            await benchmark.apply_action(action)
-            if await benchmark.is_done():
-                break
+        try:
+            await benchmark.start_episode(task)
             obs_dict = await benchmark.get_observation()
+            if rollout_recorder is not None:
+                rollout_recorder.note(obs_dict)
 
-        elapsed = await benchmark.get_time()
-        metrics = await benchmark.get_result()
-        episode_result: dict = {"metrics": metrics, "steps": step + 1, "elapsed_sec": round(elapsed, 3)}
+            # Send only serializable task info to the model server
+            task_info = {k: v for k, v in task.items() if isinstance(v, (str, int, float, bool, list))}
+            await conn.start_episode({"task": task_info})
 
-        await conn.end_episode(episode_result)
-        return episode_result
+            steps = range(max_steps) if max_steps is not None else itertools.count()
+            for step in steps:
+                action = await conn.act(obs_dict)
+                await benchmark.apply_action(action)
+                if await benchmark.is_done():
+                    break
+                obs_dict = await benchmark.get_observation()
+                if rollout_recorder is not None:
+                    rollout_recorder.note(obs_dict)
+
+            elapsed = await benchmark.get_time()
+            metrics = await benchmark.get_result()
+            episode_result: dict = {"metrics": metrics, "steps": step + 1, "elapsed_sec": round(elapsed, 3)}
+
+            await conn.end_episode(episode_result)
+            if rollout_recorder is not None:
+                rollout_recorder.flush(
+                    task,
+                    success=bool(episode_result["metrics"].get("success", False)),
+                )
+            return episode_result
+        except Exception:
+            if rollout_recorder is not None:
+                rollout_recorder.discard()
+            raise

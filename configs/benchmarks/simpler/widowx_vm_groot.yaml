@@ -1,7 +1,13 @@
-# SimplerEnv WidowX VM for GR00T (200 eps/task, simpler-groot image)
+# SimplerEnv WidowX VM for GR00T (200 eps/task, simpler-groot image).
+# Same tasks for N1.6 and N1.7. This URL is the N1.7 server
+# (configs/model_servers/phyai/groot_n17/simpler_widowx.yaml).
 extends: widowx_vm.yaml
+server:
+  url: "ws://localhost:8010"
+  timeout: 120.0
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
+  gpus: "0,1,2,3,4"
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: stack_green_cube

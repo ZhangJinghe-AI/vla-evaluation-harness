@@ -4,14 +4,16 @@
 #   https://github.com/simpler-env/SimplerEnv/tree/main/scripts
 
 server:
-  url: ws://localhost:8000
+  url: ws://localhost:8018
+  timeout: 120.0
 docker:
-  image: ghcr.io/allenai/vla-evaluation-harness/simpler:latest
+  image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
+  gpus: "0,1,2,3,4"
   env:
   - NVIDIA_DRIVER_CAPABILITIES=all
   volumes:
   - /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro
-output_dir: ./results
+output_dir: "./results_simpler_google_robot_pick_coke_can_va"
 
 _shared_init_config: &init_config
   robot_x: [0.35, 0.35, 1]

@@ -1,0 +1,31 @@
+# Smoke: 10 sequences. The full ABC→D protocol is num_sequences: 1000.
+server:
+  url: "ws://localhost:8012"
+  timeout: 120.0
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/calvin:latest
+  gpus: "0,1,2,3,4"
+  env:
+    - "NVIDIA_DRIVER_CAPABILITIES=all"
+
+output_dir: "./results_calvin_pi05"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.calvin.benchmark:CALVINBenchmark"
+    episodes_per_task: 1
+    params:
+      dataset_path: "/data/calvin/dataset/validation"
+      num_sequences: 10
+      seed: 0
+      # RLinf official calvin_eval.py protocol: 480 steps per subtask.
+      ep_len: 480
+      send_wrist_image: true
+      send_state: true
+      # InternData-Calvin actions are the env's native relative commands
+      # (scaled inside the robot). A flat 7-vector takes that path.
+      native_relative: true
+      absolute_action: false
+      # Proprio dim 6 in the training set is the previous gripper command (±1),
+      # not the opening width.
+      state_gripper_source: action

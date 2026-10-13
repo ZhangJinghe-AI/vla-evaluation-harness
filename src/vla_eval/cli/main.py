@@ -136,6 +136,11 @@ def _run_via_docker(
 
     docker_config = dict(config)
     docker_config["output_dir"] = "/workspace/results"
+    rollout_dir = config.get("rollout_dir")
+    host_rollout = str(Path(rollout_dir).resolve()) if rollout_dir else None
+    if host_rollout is not None:
+        Path(host_rollout).mkdir(parents=True, exist_ok=True)
+        docker_config["rollout_dir"] = "/workspace/rollouts"
     docker_config_fd, docker_config_path = tempfile.mkstemp(suffix=".yaml", prefix="vla-eval-docker-")
     try:
         with os.fdopen(docker_config_fd, "w") as f:
@@ -156,6 +161,8 @@ def _run_via_docker(
         "-v", f"{results_dir}:/workspace/results",
         "-v", f"{docker_config_path}:/tmp/eval_config.yaml:ro",
     ]
+    if host_rollout is not None:
+        cmd.extend(["-v", f"{host_rollout}:/workspace/rollouts"])
     # fmt: on
 
     # Forward stdin/TTY for in-container licence prompts.
@@ -793,7 +800,10 @@ Bool args become flags (--use_text_template), others become --key value.
         help="Export benchmark observations for offline calibration (.npz)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
-Exports LIBERO reset observations for downstream quantizers (e.g. QVLA).
+Exports LIBERO demonstration-replay observations for downstream quantizers (e.g. QVLA).
+
+Sampling: 10 tasks × early/mid/late phase quotas; chunk-aligned demo frames
+(default every 50 steps) with small temporal jitter; near-terminal frames dropped.
 
 By default runs inside the LIBERO Docker image (no local ``libero`` install needed).
 Use ``--no-docker`` when LIBERO is already installed in the current environment.
@@ -801,8 +811,8 @@ Use ``--no-docker`` when LIBERO is already installed in the current environment.
 examples:
 # From vla-evaluation-harness checkout (recommended):
 uv run vla-eval export-calibration \\
---suite libero_object --num-samples 16 --seed 7 \\
--o ../calibration_data/libero_object_16_7.npz
+--suite libero_object --dataset-dir /path/to/libero/datasets --num-samples 120 --seed 7 \\
+-o ../calibration_data/libero_object_120_7.npz
 
 # Force local export (LIBERO must be importable):
 uv run vla-eval export-calibration --no-docker -o ./calib.npz
@@ -813,13 +823,50 @@ uv run vla-eval export-calibration --dev -o ../calibration_data/calib.npz
     )
     export_parser.add_argument("--benchmark", choices=("libero",), default="libero")
     export_parser.add_argument("--output", "-o", required=True)
-    export_parser.add_argument("--num-samples", type=int, default=16)
+    export_parser.add_argument("--dataset-dir", default=None)
+    export_parser.add_argument(
+        "--rollout-dir",
+        default=None,
+        help="Sample the calibration npz from FP rollouts saved by eval config rollout_dir.",
+    )
+    export_parser.add_argument(
+        "--success-only",
+        action="store_true",
+        help="With --rollout-dir, keep only episodes whose eval result was success.",
+    )
+    export_parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=30,
+        help=(
+            "Output sample count; split evenly across 10 tasks and early/mid/late "
+            "phases (chunk-grid + jitter teleport)."
+        ),
+    )
     export_parser.add_argument("--suite", default="libero_object")
     export_parser.add_argument("--seed", type=int, default=7)
     export_parser.add_argument("--env-seed", type=int, default=None)
-    export_parser.add_argument("--num-steps-wait", type=int, default=10)
+    export_parser.add_argument("--max-episodes-per-task", type=int, default=50)
     export_parser.add_argument("--max-tasks", type=int, default=None)
     export_parser.add_argument("--state-dim", type=int, default=8)
+    export_parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=50,
+        help="Demo frame grid stride (default 50, matches common replan chunk).",
+    )
+    export_parser.add_argument(
+        "--jitter",
+        type=int,
+        default=2,
+        help="Per-anchor uniform jitter in ±jitter action steps (default 2).",
+    )
+    export_parser.add_argument(
+        "--end-margin",
+        type=int,
+        default=10,
+        help="Drop frames with index >= traj_len - end_margin (default 10).",
+    )
     export_parser.add_argument("--no-docker", action="store_true")
     export_parser.add_argument(
         "--docker-image",

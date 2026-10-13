@@ -1,0 +1,49 @@
+# PhyAI pi0.5 — CALVIN ABC→D SFT checkpoint (OpenPI weights), full precision.
+# Runtime flags match configs/model_servers/phyai/pi05/libero.yaml.
+# No QVLA pack: this server stays on the raw checkpoint.
+script: "./src/vla_eval/model_servers/pi05-phyai.py"
+args:
+  model_kind: "pi05"
+  checkpoint_path: "/data/share/RLinf-Pi05-CALVIN-ABC-D-SFT"
+  openpi_norm_stats: "/data/share/RLinf-Pi05-CALVIN-ABC-D-SFT/InternRobotics/InternData-Calvin_ABC/norm_stats.json"
+  # This SFT run's own config is action_horizon=5 / action_chunk=5.
+  # Denoising a 50-step suffix lets the first actions attend to 45
+  # untrained action tokens and the arm never finishes a subtask.
+  openpi_chunk_size: 5
+  # Execute the whole 5-step chunk, matching RLinf calvin_eval --action_chunk 5.
+  openpi_n_action_steps: 5
+  openpi_action_dim: 7
+  openpi_state_dim: 7
+  # CalvinInputs pads a black right-wrist image but sets its image_mask
+  # false for pi0.5. OpenPI positions are cumsum(mask), so language starts
+  # after the two real cameras. Attending to that black slot (empty_cameras
+  # 0) sends the arm through the ceiling.
+  openpi_empty_cameras: 1
+  # This SFT config sets Pi0Config.discrete_state_input false, so the
+  # prompt is the task text plus a newline. A "Task: ..., State: bins"
+  # prompt never appears in training.
+  openpi_discrete_state: false
+  # Training config num_steps is 10 (flow integration), not the generic eval default of 5.
+  openpi_num_inference_steps: 10
+  device: "cuda"
+  params_dtype: "bfloat16"
+  vision_params_dtype: "float16"
+  attn_backend: "flashinfer"
+  norm_backend: "phyai-kernel"
+  linear_backend: "torch"
+  use_differentiable_forward: False
+  use_eager_attention: False
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 0
+  noise_mode: "episode"
+  use_cuda_graph: True
+  # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
+  # for the length-dummy pad, so business max_batch_size becomes this - 1.
+  max_batch_size: 8
+  strict_pack_match: True
+  chunk_size: 5
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8012

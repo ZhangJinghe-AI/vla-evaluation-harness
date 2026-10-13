@@ -13,8 +13,10 @@ Non-obvious behaviors:
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
+import re
 import sys
 import types
 from contextlib import contextmanager
@@ -29,6 +31,20 @@ from vla_eval.types import Action, EpisodeResult, Observation, Task
 logger = logging.getLogger(__name__)
 
 ROBOTWIN_ROOT = "/app/RoboTwin"
+
+# Motion helpers that must not run during instruction-placeholder recovery.
+_MOTION_STUB_NAMES = (
+    "move",
+    "grasp_actor",
+    "place_actor",
+    "back_to_origin",
+    "move_by_displacement",
+    "open_gripper",
+    "close_gripper",
+    "delay",
+    "get_grasp_pose",
+    "pick_and_place_block",
+)
 
 
 class _EvalGripperPlanner:
@@ -179,6 +195,124 @@ def _patched_render_setup(enabled: bool):
             setattr(sapien_render, name, func)
 
 
+def _strip_instruction_markup(text: str) -> str:
+    """Remove RoboTwin ``<Place>``-style annotation tags from descriptions."""
+    cleaned = re.sub(r"<[^>\n]+>", "", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _release_robotwin_env(env: Any) -> None:
+    """Free the Sapien ray-traced renderer before the next episode.
+
+    ``gym.Env.close`` does not destroy the engine. Each episode creates a new
+    renderer, and after a few dozen of them Vulkan returns
+    ``ErrorOutOfHostMemory``. Later tasks then die in ``SapienRenderer()``
+    and the harness records that crash as a failed episode.
+    """
+    if env is None:
+        return
+    try:
+        env.close_env(clear_cache=False)
+    except Exception:
+        pass
+    for name in ("viewer", "cameras", "robot", "scene", "renderer", "engine"):
+        if hasattr(env, name):
+            try:
+                setattr(env, name, None)
+            except Exception:
+                pass
+    try:
+        from sapien.render import clear_cache
+
+        clear_cache()
+    except Exception:
+        pass
+    import gc
+
+    gc.collect()
+
+
+def _is_renderer_crash(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}"
+    return any(
+        token in text
+        for token in (
+            "OutOfHostMemory",
+            "OutOfDeviceMemory",
+            "physical device",
+            "SapienRenderer",
+            "createFenceUnique",
+        )
+    )
+
+
+def _placeholders_from_play_once(env: Any) -> dict[str, str]:
+    """Rebuild ``play_once``'s ``info`` dict without running the motion planner.
+
+    Official eval gets placeholders from a real expert ``play_once``. With
+    ``skip_expert_check`` we still need those ids/arm tags for seen templates.
+    Stub every motion helper, then call ``play_once`` so assignments like
+    ``pick_and_place_block`` (which choose an arm from object pose) still run.
+    """
+    if env is None:
+        return {}
+
+    originals: dict[str, Any] = {}
+    try:
+        from envs.utils.action import ArmTag
+
+        def _arm_for(actor: Any) -> Any:
+            try:
+                x = float(np.asarray(actor.get_pose().p).reshape(-1)[0])
+            except Exception:
+                x = 0.0
+            return ArmTag("left" if x < 0 else "right")
+
+        def _pick_and_place_block(block: Any, target_pose: Any = None) -> str:
+            return str(_arm_for(block))
+
+        stubs: dict[str, Any] = {
+            "move": lambda *args, **kwargs: None,
+            "grasp_actor": lambda *args, **kwargs: None,
+            "place_actor": lambda *args, **kwargs: None,
+            "back_to_origin": lambda *args, **kwargs: None,
+            "move_by_displacement": lambda *args, **kwargs: None,
+            "open_gripper": lambda *args, **kwargs: None,
+            "close_gripper": lambda *args, **kwargs: None,
+            "delay": lambda *args, **kwargs: None,
+            "get_grasp_pose": lambda *args, **kwargs: None,
+            "pick_and_place_block": _pick_and_place_block,
+        }
+        for name in _MOTION_STUB_NAMES:
+            if hasattr(env, name):
+                originals[name] = getattr(env, name)
+                setattr(env, name, stubs[name])
+
+        if isinstance(getattr(env, "info", None), dict):
+            env.info.pop("info", None)
+
+        result = env.play_once()
+        raw: dict[str, Any] = {}
+        if isinstance(result, dict):
+            maybe = result.get("info")
+            if isinstance(maybe, dict):
+                raw = maybe
+        if not raw:
+            raw = getattr(env, "info", {}).get("info") or {}
+    except Exception as exc:
+        logger.warning(
+            "Could not recover %s instruction placeholders: %s",
+            type(env).__name__,
+            exc,
+        )
+        return {}
+    finally:
+        for name, func in originals.items():
+            setattr(env, name, func)
+
+    return {str(key): str(value) for key, value in raw.items()}
+
+
 class RoboTwinBenchmark(StepBenchmark):
     """RoboTwin dual-arm manipulation benchmark (SAPIEN/CuRobo).
 
@@ -200,7 +334,7 @@ class RoboTwinBenchmark(StepBenchmark):
 
     def __init__(
         self,
-        task_name: str,
+        task_name: str | None = None,
         task_config: str = "demo_clean",
         seed: int = 0,
         instruction_type: str = "seen",
@@ -208,15 +342,23 @@ class RoboTwinBenchmark(StepBenchmark):
         skip_expert_check: bool = False,
         fast_init: bool = True,
         fast_render: bool = False,
+        task_names: list[str] | None = None,
     ) -> None:
         import re
 
         super().__init__()
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", task_name):
-            raise ValueError(f"Invalid task_name: {task_name!r}")
+        names = [str(name) for name in (task_names or [])]
+        if task_name and task_name not in names:
+            names.insert(0, task_name)
+        if not names:
+            raise ValueError("RoboTwinBenchmark requires task_name or task_names.")
+        for name in names:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError(f"Invalid task_name: {name!r}")
         if not re.fullmatch(r"[A-Za-z0-9_-]+", task_config):
             raise ValueError(f"Invalid task_config: {task_config!r}")
-        self.task_name = task_name
+        self.task_names = names
+        self.task_name = names[0]
         self.task_config = task_config
         self.seed = seed
         self.instruction_type = instruction_type
@@ -293,19 +435,16 @@ class RoboTwinBenchmark(StepBenchmark):
         with _defer_open3d_import(enabled=not args.get("data_type", {}).get("pointcloud", False)):
             envs_module = importlib.import_module(f"envs.{self.task_name}")
         self._env_class = getattr(envs_module, self.task_name)
-        logger.info("RoboTwin initialised: task=%s", self.task_name)
+        logger.info("RoboTwin initialised: tasks=%s", ",".join(self.task_names))
 
     def _create_env(self) -> Any:
         assert self._env_class is not None
         return self._env_class()
 
     def cleanup(self) -> None:
-        if self._env is not None:
-            try:
-                self._env.close_env(clear_cache=True)
-            except Exception:
-                pass
-            self._env = None
+        env = self._env
+        self._env = None
+        _release_robotwin_env(env)
 
     # -----------------------------------------------------------------
     # StepBenchmark interface
@@ -319,84 +458,200 @@ class RoboTwinBenchmark(StepBenchmark):
         if self.skip_expert_check:
             return [
                 {
-                    "name": self.task_name,
+                    "name": name,
                     "suite": "robotwin",
                     "seed": st_seed + i,
                     "episode_idx": i,
-                    "instruction": f"Perform the {self.task_name} task.",
+                    "task_id": st_seed + i,
+                    # Placeholder; reset() rebuilds a seen-template instruction.
+                    "instruction": f"Perform the {name} task.",
                 }
+                for name in self.task_names
                 for i in range(self.test_num)
             ]
 
-        # Full expert check — run oracle planner per seed
+        # Full expert check — same protocol as RoboTwin eval_policy.py:
+        # only keep seeds where the oracle plans and check_success() pass.
         from generate_episode_instructions import generate_episode_descriptions
 
-        env = self._create_env()
         tasks: list[Task] = []
-        now_seed = st_seed
-        episode_idx = 0
-        logger.info("Running expert checks from seed %d ...", st_seed)
-
-        while len(tasks) < self.test_num:
+        for task_name in self.task_names:
+            self._use_task(task_name)
+            env = self._create_env()
+            now_seed = st_seed
+            episode_idx = 0
+            logger.info(
+                "Running expert checks for %s from seed %d ...",
+                task_name,
+                st_seed,
+            )
             try:
-                env.setup_demo(
-                    now_ep_num=episode_idx,
-                    seed=now_seed,
-                    is_test=True,
-                    **self._args,
-                )
-                episode_info = env.play_once()
-                env.close_env()
-                if env.plan_success and env.check_success():
-                    results = generate_episode_descriptions(
-                        self.task_name,
-                        [episode_info["info"]],
-                        self.test_num,
-                    )
-                    instruction = np.random.choice(
-                        results[0][self.instruction_type],
-                    )
-                    tasks.append(
-                        {
-                            "name": self.task_name,
-                            "suite": "robotwin",
-                            "seed": now_seed,
-                            "episode_idx": episode_idx,
-                            "instruction": instruction,
-                        }
-                    )
-                    episode_idx += 1
-            except Exception as e:
-                logger.warning("Expert check failed for seed %d: %s", now_seed, e)
-                try:
-                    env.close_env()
-                except Exception:
-                    pass
-            now_seed += 1
+                while episode_idx < self.test_num:
+                    try:
+                        env.setup_demo(
+                            now_ep_num=episode_idx,
+                            seed=now_seed,
+                            is_test=True,
+                            **self._args,
+                        )
+                        episode_info = env.play_once()
+                        env.close_env()
+                        if env.plan_success and env.check_success():
+                            results = generate_episode_descriptions(
+                                task_name,
+                                [episode_info["info"]],
+                                self.test_num,
+                            )
+                            instruction = str(
+                                np.random.default_rng(now_seed).choice(
+                                    results[0][self.instruction_type],
+                                )
+                            )
+                            tasks.append(
+                                {
+                                    "name": task_name,
+                                    "suite": "robotwin",
+                                    "seed": now_seed,
+                                    "episode_idx": episode_idx,
+                                    "task_id": now_seed,
+                                    "instruction": instruction,
+                                    "instruction_ready": True,
+                                }
+                            )
+                            episode_idx += 1
+                    except Exception as e:
+                        logger.warning(
+                            "Expert check failed for %s seed %d: %s",
+                            task_name,
+                            now_seed,
+                            e,
+                        )
+                        try:
+                            env.close_env()
+                        except Exception:
+                            pass
+                    now_seed += 1
+            finally:
+                _release_robotwin_env(env)
         return tasks
 
-    def reset(self, task: Task) -> Any:
+    def _use_task(self, task_name: str) -> None:
+        """Load the env class for ``task_name``. Embodiment config stays cached."""
         self._init_robotwin()
+        if self._env_class is not None and self.task_name == task_name:
+            return
+        assert self._args is not None
+        self.task_name = task_name
+        self._args["task_name"] = task_name
+        with _defer_open3d_import(enabled=not self._args.get("data_type", {}).get("pointcloud", False)):
+            envs_module = importlib.import_module(f"envs.{task_name}")
+        self._env_class = getattr(envs_module, task_name)
+
+    def reset(self, task: Task) -> Any:
+        self._use_task(str(task["name"]))
         assert self._args is not None
 
         if self._env is not None:
-            try:
-                self._env.close_env(clear_cache=True)
-            except Exception as e:
-                logger.warning("Failed to close previous RoboTwin env: %s", e)
+            previous = self._env
             self._env = None
+            _release_robotwin_env(previous)
 
-        self._env = self._create_env()
-        with _patched_robot_set_planner(self.fast_init), _patched_render_setup(self.fast_render):
-            self._env.setup_demo(
-                now_ep_num=task.get("episode_idx", 0),
-                seed=task["seed"],
-                is_test=True,
-                **self._args,
-            )
-        self._env.set_instruction(instruction=task["instruction"])
+        # Always use the seed assigned in get_tasks(). Bumping the seed on
+        # UnStableError / renderer crash made the same episode_idx land on
+        # different scenes across runs.
+        seed = int(task["seed"])
+        last_error: Exception | None = None
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if self._env is not None:
+                previous = self._env
+                self._env = None
+                _release_robotwin_env(previous)
+            self._env = self._create_env()
+            try:
+                with _patched_robot_set_planner(self.fast_init), _patched_render_setup(self.fast_render):
+                    self._env.setup_demo(
+                        now_ep_num=task.get("episode_idx", 0),
+                        seed=seed,
+                        is_test=True,
+                        **self._args,
+                    )
+                break
+            except Exception as exc:
+                last_error = exc
+                if type(exc).__name__ == "UnStableError":
+                    logger.warning(
+                        "Unstable RoboTwin seed %s for %s (attempt %d/%d); "
+                        "retrying the same seed.",
+                        seed,
+                        task["name"],
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    continue
+                if _is_renderer_crash(exc) and attempt + 1 < max_attempts:
+                    logger.warning(
+                        "RoboTwin renderer crashed for %s (%s); "
+                        "releasing it and retrying seed %s.",
+                        task["name"],
+                        exc,
+                        seed,
+                    )
+                    continue
+                raise
+        else:
+            assert last_error is not None
+            raise last_error
+        instruction = self._instruction_for_episode(task)
+        task["instruction"] = instruction
+        self._env.set_instruction(instruction=instruction)
         raw_obs = self._env.get_obs()
         return raw_obs
+
+    def _instruction_for_episode(self, task: Task) -> str:
+        """Use a training-style sentence instead of the placeholder task name.
+
+        Expert-check ``get_tasks()`` already fills a real seen template; keep it.
+        ``skip_expert_check`` only has ``"Perform the <task> task."``, so rebuild
+        from ``description/task_instruction`` using stubbed ``play_once`` info.
+        """
+        existing = str(task.get("instruction", "") or "")
+        if task.get("instruction_ready") or (
+            existing
+            and not existing.startswith("Perform the ")
+            and "{" not in existing
+            and "<" not in existing
+        ):
+            logger.info("RoboTwin instruction: %s", existing)
+            return existing
+
+        path = os.path.join(
+            ROBOTWIN_ROOT, "description", "task_instruction", f"{self.task_name}.json"
+        )
+        try:
+            with open(path) as handle:
+                spec = json.load(handle)
+        except OSError:
+            return existing
+
+        episode = _placeholders_from_play_once(self._env)
+        seen = list(spec.get("seen") or [])
+        if episode and seen:
+            from generate_episode_instructions import filter_instructions, replace_placeholders
+
+            matched = filter_instructions(list(seen), episode)
+            pool = matched or seen
+            template = pool[int(task.get("episode_idx", 0)) % len(pool)]
+            text = replace_placeholders(template, episode)
+            if text and "{" not in text:
+                logger.info("RoboTwin instruction: %s", text)
+                return text
+
+        full = _strip_instruction_markup(str(spec.get("full_description") or ""))
+        if full and "{" not in full:
+            logger.info("RoboTwin instruction: %s", full)
+            return full
+        return existing
 
     def step(self, action: Action) -> StepResult:
         raw = action.get("actions", action.get("action"))
@@ -433,9 +688,31 @@ class RoboTwinBenchmark(StepBenchmark):
     def get_step_result(self, step_result: StepResult) -> EpisodeResult:
         return {"success": step_result.info.get("success", False)}
 
+    def _official_step_limit(self) -> int:
+        """Highest official eval horizon for the tasks in this run.
+
+        RoboTwin's per-task limits live in ``task_config/_eval_step_limit.yml``
+        and run from 400 to 1700. A flat cap of 400 stops the long tasks
+        before the env's own ``step_lim`` and records them as failures.
+        """
+        path = os.path.join(ROBOTWIN_ROOT, "task_config", "_eval_step_limit.yml")
+        limits: dict[str, int] = {}
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    text = line.strip()
+                    if not text or text.startswith("#") or ":" not in text:
+                        continue
+                    key, value = text.split(":", 1)
+                    limits[key.strip()] = int(value.strip())
+        except OSError:
+            return 1700
+        selected = [limits.get(name, 400) for name in self.task_names]
+        return max(selected) if selected else 400
+
     def get_metadata(self) -> dict[str, Any]:
         return {
-            "max_steps": 400,
+            "max_steps": self._official_step_limit(),
             "task_name": self.task_name,
             "action_dim": 14,
             "max_episodes_per_task": self.test_num,

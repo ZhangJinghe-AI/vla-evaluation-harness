@@ -28,13 +28,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Benchmark to sample (default: libero).",
     )
     parser.add_argument("--output", "-o", required=True, help="Output .npz path.")
-    parser.add_argument("--num-samples", type=int, default=16)
+    parser.add_argument(
+        "--dataset-dir",
+        default=None,
+        help="LIBERO datasets root directory (contains <suite>/<task>_demo.hdf5).",
+    )
+    parser.add_argument(
+        "--rollout-dir",
+        default=None,
+        help="Sample the calibration npz from FP rollouts saved by eval config rollout_dir.",
+    )
+    parser.add_argument(
+        "--success-only",
+        action="store_true",
+        help="With --rollout-dir, keep only episodes whose eval result was success.",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=30,
+        help=(
+            "Output sample count; split evenly across 10 tasks and early/mid/late "
+            "phases (chunk-grid + jitter teleport)."
+        ),
+    )
     parser.add_argument("--suite", default="libero_object")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--env-seed", type=int, default=None)
-    parser.add_argument("--num-steps-wait", type=int, default=10)
     parser.add_argument("--max-tasks", type=int, default=None)
+    parser.add_argument("--max-episodes-per-task", type=int, default=50)
     parser.add_argument("--state-dim", type=int, default=8)
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=50,
+        help="Demo frame grid stride (default 50, matches common replan chunk).",
+    )
+    parser.add_argument(
+        "--jitter",
+        type=int,
+        default=2,
+        help="Per-anchor uniform jitter in ±jitter action steps (default 2).",
+    )
+    parser.add_argument(
+        "--end-margin",
+        type=int,
+        default=10,
+        help="Drop frames with index >= traj_len - end_margin (default 10).",
+    )
     parser.add_argument(
         "--no-docker",
         action="store_true",
@@ -85,6 +126,9 @@ def _export_via_docker(args: argparse.Namespace) -> None:
 
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    dataset_dir = Path(args.dataset_dir).expanduser().resolve()
+    if not dataset_dir.is_dir():
+        raise FileNotFoundError(f"LIBERO dataset directory does not exist: {dataset_dir}")
 
     container_name = f"vla-eval-export-{os.getpid()}"
     cmd: list[str] = [
@@ -97,6 +141,8 @@ def _export_via_docker(args: argparse.Namespace) -> None:
         "conda",
         "-v",
         f"{output.parent}:{output.parent}",
+        "-v",
+        f"{dataset_dir}:{dataset_dir}:ro",
     ]
     if args.dev:
         src = _resolve_harness_src()
@@ -118,14 +164,22 @@ def _export_via_docker(args: argparse.Namespace) -> None:
             str(output),
             "--num-samples",
             str(args.num_samples),
+            "--dataset-dir",
+            str(dataset_dir),
             "--suite",
             args.suite,
             "--seed",
             str(args.seed),
-            "--num-steps-wait",
-            str(args.num_steps_wait),
+            "--max-episodes-per-task",
+            str(args.max_episodes_per_task),
             "--state-dim",
             str(args.state_dim),
+            "--chunk-size",
+            str(args.chunk_size),
+            "--jitter",
+            str(args.jitter),
+            "--end-margin",
+            str(args.end_margin),
         ]
     )
     if args.env_seed is not None:
@@ -140,16 +194,40 @@ def _export_via_docker(args: argparse.Namespace) -> None:
     sys.exit(rc)
 
 
+def _export_from_rollouts(args: argparse.Namespace) -> int:
+    from vla_eval.calibration.rollout import export_rollout_calibration
+
+    out = export_rollout_calibration(
+        args.rollout_dir,
+        args.output,
+        num_samples=args.num_samples,
+        seed=args.seed,
+        chunk_size=args.chunk_size,
+        jitter=args.jitter,
+        end_margin=args.end_margin,
+        success_only=bool(getattr(args, "success_only", False)),
+        state_dim=args.state_dim,
+    )
+    print(f"Exported {args.num_samples} samples to {out}")
+    return 0
+
+
 def run_export(args: argparse.Namespace) -> int:
+    if not args.dataset_dir:
+        raise ValueError("LIBERO export requires --dataset-dir, or pass --rollout-dir to sample saved rollouts.")
     if args.benchmark != "libero":
         raise ValueError(f"Unsupported benchmark: {args.benchmark!r}")
     cfg = LiberoExportConfig(
+        dataset_dir=args.dataset_dir,
         suite=args.suite,
         seed=args.seed,
         env_seed=args.env_seed,
-        num_steps_wait=args.num_steps_wait,
+        max_episodes_per_task=args.max_episodes_per_task,
         max_tasks=args.max_tasks,
         state_dim=args.state_dim,
+        chunk_size=args.chunk_size,
+        jitter=args.jitter,
+        end_margin=args.end_margin,
     )
     out = export_libero_dataset(
         args.output,
@@ -161,6 +239,8 @@ def run_export(args: argparse.Namespace) -> int:
 
 
 def cmd_export_calibration(args: argparse.Namespace) -> None:
+    if getattr(args, "rollout_dir", None):
+        sys.exit(_export_from_rollouts(args))
     if not args.no_docker and not _inside_docker():
         _export_via_docker(args)
         return
@@ -169,6 +249,8 @@ def cmd_export_calibration(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.rollout_dir:
+        return _export_from_rollouts(args)
     if not args.no_docker and not _inside_docker():
         _export_via_docker(args)
         return 0

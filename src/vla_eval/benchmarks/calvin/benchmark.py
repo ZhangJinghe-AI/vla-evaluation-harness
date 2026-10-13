@@ -193,7 +193,11 @@ class CALVINBenchmark(StepBenchmark):
         send_wrist_image: bool = False,
         send_state: bool = False,
         absolute_action: bool = False,
+        absolute_rotation: str = "axisangle",
+        absolute_gripper: str = "close_positive",
         ep_len: int | None = None,
+        state_gripper_source: str = "width",
+        native_relative: bool = False,
     ) -> None:
         super().__init__()
         self.dataset_path = dataset_path
@@ -201,8 +205,30 @@ class CALVINBenchmark(StepBenchmark):
         self.seed = seed
         self.send_wrist_image = send_wrist_image
         self.send_state = send_state
+        if absolute_rotation not in ("axisangle", "euler"):
+            raise ValueError(
+                "absolute_rotation must be axisangle or euler, "
+                f"got {absolute_rotation!r}."
+            )
+        if absolute_gripper not in ("close_positive", "passthrough", "sign"):
+            raise ValueError(
+                "absolute_gripper must be close_positive, passthrough, or sign, "
+                f"got {absolute_gripper!r}."
+            )
         self.absolute_action = absolute_action
+        self.absolute_rotation = absolute_rotation
+        self.absolute_gripper = absolute_gripper
         self._ep_len = ep_len
+        if state_gripper_source not in ("width", "action"):
+            raise ValueError(
+                "state_gripper_source must be width or action, "
+                f"got {state_gripper_source!r}."
+            )
+        self.state_gripper_source = state_gripper_source
+        # Training actions (InternData-Calvin) are the env's native relative
+        # commands. The robot scales a flat 7-vector; a 3-way split is treated
+        # as an absolute target. ``native_relative`` selects the flat path.
+        self.native_relative = native_relative
         self._env = None
         self._task_oracle = None
         self._sequences: list | None = None
@@ -260,7 +286,7 @@ class CALVINBenchmark(StepBenchmark):
                 "rgb_obs": rgb_obs_list,
                 "depth_obs": [],
                 "state_obs": ["robot_obs"],
-                "actions": ["actions"],
+                "actions": ["rel_actions"] if self.native_relative else ["actions"],
                 "language": ["language"],
             }
         )
@@ -433,6 +459,7 @@ class CALVINBenchmark(StepBenchmark):
                     "initial_condition": initial_condition,
                     "eval_sequence": eval_sequence,
                     "seq_idx": idx,
+                    "task_id": idx,
                 }
             )
         return tasks
@@ -468,7 +495,9 @@ class CALVINBenchmark(StepBenchmark):
 
         ep_len = self._ep_len or EP_LEN
 
-        if self.absolute_action:
+        if self.native_relative:
+            act = self._process_native_relative_action(action)
+        elif self.absolute_action:
             act = self._process_absolute_action(action)
         else:
             act = self._process_delta_action(action)
@@ -519,6 +548,33 @@ class CALVINBenchmark(StepBenchmark):
 
         return StepResult(obs=obs, reward=0.0, done=False, info={})
 
+    def _process_native_relative_action(self, action: Action) -> np.ndarray:
+        """Flat 7-D relative command. The env scales xyz/euler and binarizes gripper."""
+        raw_action = action.get("actions", action.get("action"))
+        if isinstance(raw_action, (list, np.ndarray)):
+            raw = np.asarray(raw_action, dtype=np.float64).flatten()[:7]
+        else:
+            raw = np.zeros(7, dtype=np.float64)
+        if len(raw) < 7:
+            raw = np.pad(raw, (0, 7 - len(raw)))
+        step = getattr(self, "_subtask_step", 0)
+        if step < 3 or step % 100 == 0:
+            tcp = None
+            if self._env is not None:
+                try:
+                    tcp = self._env.get_obs()["robot_obs_raw"]
+                    tcp = np.asarray(tcp.detach().cpu().numpy()).reshape(-1)[:3]
+                except Exception:
+                    tcp = None
+            logger.info(
+                "calvin_act step=%d act=%s tcp=%s task=%s",
+                step,
+                np.array2string(raw, precision=3),
+                None if tcp is None else np.array2string(tcp, precision=3),
+                self._eval_sequence[self._subtask_idx] if self._eval_sequence else None,
+            )
+        return raw
+
     def _process_absolute_action(self, action: Action) -> np.ndarray:
         """Process 7D absolute action [pos3, axisangle3, gripper] → [pos3, euler3, gripper].
 
@@ -531,8 +587,17 @@ class CALVINBenchmark(StepBenchmark):
             raw = np.zeros(7, dtype=np.float64)
 
         pos = raw[:3]
-        euler = matrix_to_euler_xyz(axisangle_to_matrix(raw[3:6].astype(np.float32)))
-        gripper = -1.0 if raw[6] > 0 else 1.0
+        if self.absolute_rotation == "euler":
+            euler = raw[3:6]
+        else:
+            euler = matrix_to_euler_xyz(axisangle_to_matrix(raw[3:6].astype(np.float32)))
+        if self.absolute_gripper == "passthrough":
+            gripper = float(raw[6])
+        elif self.absolute_gripper == "sign":
+            # RLinf official calvin_eval.py: action[-1] = 1 if > 0 else -1
+            gripper = 1.0 if raw[6] > 0 else -1.0
+        else:
+            gripper = -1.0 if raw[6] > 0 else 1.0
 
         return np.concatenate([pos, euler, [gripper]])
 
@@ -578,9 +643,15 @@ class CALVINBenchmark(StepBenchmark):
             obs["images"]["rgb_gripper"] = wrist_img
 
         if self.send_state:
-            # 8D: [pos3, euler3, gripper2] — CALVIN proprio_state subset
+            # 7D state: [pos3, euler3, gripper1]. RLinf InternData-Calvin_ABC
+            # norm stats show state dim 6 in {-1,+1} (mean -0.072 ≈ actions
+            # gripper mean -0.095), i.e. the training proprio used the previous
+            # gripper ACTION (robot_obs[14]), not the opening width.
             raw = raw_obs["robot_obs_raw"].cpu().numpy()
-            obs["states"] = np.concatenate([raw[0:7], raw[14:15]]).astype(np.float32)
+            if self.state_gripper_source == "action":
+                obs["states"] = np.concatenate([raw[0:6], raw[14:15]]).astype(np.float32)
+            else:
+                obs["states"] = raw[0:7].astype(np.float32)
 
         # Signal model server to reset internal state on subtask transition
         if self._subtask_just_reset:

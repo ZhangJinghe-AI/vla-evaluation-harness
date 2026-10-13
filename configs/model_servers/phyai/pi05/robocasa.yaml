@@ -1,0 +1,30 @@
+# PhyAI pi0.5 — RoboCasa LeRobot checkpoint, full precision.
+# Three cameras, 16-D state, 12-D action. The benchmark sets action_dim: 12.
+# Runtime flags match configs/model_servers/phyai/pi05/libero.yaml.
+# No QVLA pack: this server stays on the raw checkpoint.
+script: "./src/vla_eval/model_servers/pi05-phyai.py"
+args:
+  model_kind: "pi05"
+  checkpoint_path: "/data/share/pi05_robocasa"
+  device: "cuda"
+  params_dtype: "bfloat16"
+  vision_params_dtype: "float16"
+  attn_backend: "flashinfer"
+  norm_backend: "phyai-kernel"
+  linear_backend: "torch"
+  use_differentiable_forward: False
+  use_eager_attention: False
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 0
+  noise_mode: "episode"
+  use_cuda_graph: True
+  # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
+  # for the length-dummy pad, so business max_batch_size becomes this - 1.
+  max_batch_size: 8
+  strict_pack_match: True
+  chunk_size: 50
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8014

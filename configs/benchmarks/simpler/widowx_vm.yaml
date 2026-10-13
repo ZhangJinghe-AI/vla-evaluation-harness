@@ -7,15 +7,17 @@
 # come from model server get_observation_params().
 server:
   url: "ws://localhost:8000"
+  timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler:latest
+  gpus: "0,1,2,3,4"
   env:
     - "NVIDIA_DRIVER_CAPABILITIES=all"          # Vulkan/graphics for SAPIEN rendering
   volumes:
     - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro"  # Vulkan ICD for GPU enumeration
 
-output_dir: "./results"
+output_dir: "./results_simpler_widowx_groot"
 
 benchmarks:
   # Task 1: Stack Green Cube on Yellow Cube

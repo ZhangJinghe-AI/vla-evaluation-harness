@@ -86,6 +86,8 @@ class LIBEROBenchmark(StepBenchmark):
             When None, uses ``MAX_STEP_MAPPING[suite]``.
         env_seed: Seed for ``env.seed()``.  When None, defaults to ``seed``.
             OpenVLA reference uses ``env_seed=0`` separately from ``seed=7``.
+        episode_offset: Added to ``episode_idx`` when selecting LIBERO init
+            states. Use 20 to evaluate held-out inits 20–39 after a 0–19 search.
     """
 
     def __init__(
@@ -99,6 +101,7 @@ class LIBEROBenchmark(StepBenchmark):
         max_steps: int | None = None,
         env_seed: int | None = None,
         quat_no_antipodal: bool = False,
+        episode_offset: int = 0,
     ) -> None:
         super().__init__()
         self.suite = suite
@@ -110,6 +113,9 @@ class LIBEROBenchmark(StepBenchmark):
         self.send_state = send_state
         self.absolute_action = absolute_action
         self._max_steps = max_steps
+        if not isinstance(episode_offset, int) or isinstance(episode_offset, bool) or episode_offset < 0:
+            raise ValueError(f"episode_offset must be a non-negative int, got {episode_offset!r}")
+        self.episode_offset = episode_offset
         self._env = None
         self._task_suite = None
         self._current_task_id: int | None = None
@@ -163,7 +169,7 @@ class LIBEROBenchmark(StepBenchmark):
             )
         return tasks
 
-    def reset(self, task: Task) -> Any:
+    def _reset_env(self, task: Task) -> None:
         from pathlib import Path
 
         from libero.libero import get_libero_path
@@ -171,7 +177,6 @@ class LIBEROBenchmark(StepBenchmark):
 
         task_obj = task["task_obj"]
         task_id = task["task_id"]
-        episode_idx = task.get("episode_idx", 0)
 
         # Only create a new env when the task changes (reuse across episodes)
         if self._env is None or self._current_task_id != task_id:
@@ -192,9 +197,20 @@ class LIBEROBenchmark(StepBenchmark):
         # Reset env before setting init state (matches reference)
         self._env.reset()
 
+    def reset(self, task: Task) -> Any:
+        self._reset_env(task)
+
         # Set initial state
         assert self._task_suite is not None
+        assert self._env is not None
+        task_id = task["task_id"]
+        episode_idx = int(task.get("episode_idx", 0)) + self.episode_offset
         initial_states = self._task_suite.get_task_init_states(task_id)
+        if episode_idx >= len(initial_states):
+            raise IndexError(
+                f"init index {episode_idx} is out of range for task_id={task_id} "
+                f"(n_inits={len(initial_states)}, episode_offset={self.episode_offset})"
+            )
         obs = self._env.set_init_state(initial_states[episode_idx])
 
         # Run dummy action wait steps (always in delta mode to avoid slamming to origin)
@@ -207,6 +223,12 @@ class LIBEROBenchmark(StepBenchmark):
                 robot.controller.use_delta = False
 
         return obs
+
+    def reset_to_state(self, task: Task, state: np.ndarray) -> Any:
+        """Reset a task directly to a recorded MuJoCo state."""
+        self._reset_env(task)
+        assert self._env is not None
+        return self._env.set_init_state(state)
 
     def step(self, action: Action) -> StepResult:
         raw_action = action.get("actions", action.get("action"))

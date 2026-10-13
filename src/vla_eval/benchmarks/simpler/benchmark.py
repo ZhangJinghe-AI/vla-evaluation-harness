@@ -41,6 +41,57 @@ def _linspace_from_range(spec: list[float]) -> np.ndarray:
     return np.linspace(spec[0], spec[1], int(spec[2]))
 
 
+def _use_ibl_shader_for_drawers() -> None:
+    """Drawer visual-matching defaults to the RT shader.
+
+    On this GPU OptiX denoising fails and the cabinet/robot foreground
+    renders as a black blob, so the policy never sees the drawer. Pick-coke
+    uses the default ``ibl`` shader and renders the arm. Keep that shader
+    for drawer tasks too.
+    """
+    from mani_skill2_real2sim.envs.custom_scenes.open_drawer_in_scene import (
+        OpenDrawerInSceneEnv,
+    )
+
+    if getattr(OpenDrawerInSceneEnv, "_vla_ibl_shader", False):
+        return
+    original = OpenDrawerInSceneEnv._setup_prepackaged_env_init_config
+
+    def _ibl_config(self):
+        config = original(self)
+        config["shader_dir"] = "ibl"
+        return config
+
+    OpenDrawerInSceneEnv._setup_prepackaged_env_init_config = _ibl_config
+    OpenDrawerInSceneEnv._vla_ibl_shader = True
+
+
+def _enable_physx_enhanced_determinism() -> None:
+    """Turn on PhysX enhanced determinism for every ManiSkill2 scene.
+
+    ManiSkill2's default ``SceneConfig`` leaves
+    ``enable_enhanced_determinism=False``. With that flag off, GPU PhysX
+    contact resolution can drift across otherwise identical rollouts and
+    change episode success. SAPIEN exposes the PhysX switch on
+    ``SceneConfig``; wrapping ``BaseEnv._get_default_scene_config`` turns
+    it on without forking the env image. TGS stays as ManiSkill set it
+    (needed for Google-robot mesh contacts).
+    """
+    from mani_skill2_real2sim.envs.sapien_env import BaseEnv
+
+    if getattr(BaseEnv, "_vla_enhanced_determinism", False):
+        return
+    original = BaseEnv._get_default_scene_config
+
+    def _deterministic_scene_config(self):
+        scene_config = original(self)
+        scene_config.enable_enhanced_determinism = True
+        return scene_config
+
+    BaseEnv._get_default_scene_config = _deterministic_scene_config
+    BaseEnv._vla_enhanced_determinism = True
+
+
 class SimplerEnvBenchmark(StepBenchmark):
     """SimplerEnv (ManiSkill2 real2sim) benchmark.
 
@@ -182,7 +233,10 @@ class SimplerEnvBenchmark(StepBenchmark):
     # ------------------------------------------------------------------
 
     def get_tasks(self) -> list[Task]:
-        return [{"name": self.task_name, "task_name": self.task_name}]
+        import zlib
+
+        task_id = zlib.adler32(self.task_name.encode()) & 0x7FFFFFFF
+        return [{"name": self.task_name, "task_name": self.task_name, "task_id": task_id}]
 
     def reset(self, task: Task) -> Any:
         # Close previous env -- new env per episode (matches reference)
@@ -197,8 +251,28 @@ class SimplerEnvBenchmark(StepBenchmark):
             self._env, reset_kwargs = self._make_va_env(task)
         else:
             self._env, reset_kwargs = self._make_vm_env(task)
-        if self.seed is not None:
-            reset_kwargs["seed"] = self.seed
+        # A new env is built every episode, which restarts ManiSkill's main RNG
+        # at its default seed. reset(seed=None) then repeats the same drawer,
+        # overlay, and robot pose. Official GoogleFractalEnv forwards a seed.
+        episode_idx = int(task.get("episode_idx", 0))
+        base_seed = 0 if self.seed is None else int(self.seed)
+        episode_seed = base_seed + episode_idx
+        reset_kwargs["seed"] = episode_seed
+        # Pin host RNGs that ManiSkill / overlays may still touch. GPU PhysX
+        # can still differ by a few bits across runs; this removes the
+        # Python-side sources of drift.
+        import random
+
+        random.seed(episode_seed)
+        np.random.seed(episode_seed)
+        try:
+            import torch
+        except ImportError:
+            torch = None
+        if torch is not None:
+            torch.manual_seed(episode_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(episode_seed)
 
         obs, _ = self._env.reset(**reset_kwargs)
 
@@ -224,6 +298,7 @@ class SimplerEnvBenchmark(StepBenchmark):
         import simpler_env  # noqa: F401 -- registers ManiSkill2 envs
         import gymnasium as gym
 
+        _enable_physx_enhanced_determinism()
         make_kwargs = {"obs_mode": "rgbd", **self.env_build_kwargs, **self._common_make_kwargs()}
         if self.scene_name is not None:
             make_kwargs["scene_name"] = self.scene_name
@@ -236,6 +311,9 @@ class SimplerEnvBenchmark(StepBenchmark):
         """VM path: ``simpler_env.make()`` with prepackaged config."""
         import simpler_env
 
+        _enable_physx_enhanced_determinism()
+        if "drawer" in self.task_name:
+            _use_ibl_shader_for_drawers()
         env = simpler_env.make(self.task_name, **self._common_make_kwargs())
 
         # deterministic_episodes=True: pass episode_id for reproducible
@@ -283,7 +361,11 @@ class SimplerEnvBenchmark(StepBenchmark):
         obs, reward, done, truncated, info = self._env.step(env_action)
 
         info["truncated"] = truncated
-        if done:
+        # Official GoogleFractalEnv / WidowXBridgeEnv score info["success"].
+        # ManiSkill also sets terminated (done) on some tasks. Count either.
+        raw_success = info.get("success", False)
+        step_success = bool(np.asarray(raw_success).reshape(-1).any()) or bool(done)
+        if step_success:
             self._success_seen = True
 
         return StepResult(obs=obs, reward=reward, done=done, info=info)
@@ -294,6 +376,13 @@ class SimplerEnvBenchmark(StepBenchmark):
         )
 
         image = get_image_from_maniskill2_obs_dict(self._env, raw_obs)
+        # Place-in-drawer changes the sentence after the drawer opens
+        # ("open top drawer" -> "place apple into top drawer"). Official
+        # GoogleFractalEnv reads the instruction on every observation.
+        try:
+            self._task_description = self._env.unwrapped.get_language_instruction()
+        except Exception:
+            pass
 
         obs: Observation = {
             "images": {"primary": image},

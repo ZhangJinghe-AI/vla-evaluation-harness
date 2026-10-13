@@ -1,0 +1,32 @@
+# PhyAI GR00T-N1.7 — SimplerEnv WidowX (Bridge), full precision.
+# Runtime flags match configs/model_servers/phyai/groot_n17/libero.yaml.
+# Capture task texts are hard-coded in groot-n17-phyai.py under model_suite.
+# No QVLA pack: this server stays on the raw checkpoint.
+script: "./src/vla_eval/model_servers/groot-n17-phyai.py"
+args:
+  model_kind: "groot_n17"
+  checkpoint_root: "/data/share/GR00T-N1.7-SimplerEnv"
+  checkpoint_path: "/data/share/GR00T-N1.7-SimplerEnv/GR00T-N1.7-SimplerEnv-Bridge"
+  model_suite: "simpler_widowx"
+  embodiment_tag: "SIMPLER_ENV_WIDOWX"
+  state_layout: "simpler_widowx"
+  invert_gripper: False
+  processor_model_name_or_path: "/data/share/Cosmos-Reason2-2B"
+  device: "cuda"
+  params_dtype: "bfloat16"
+  use_differentiable_forward: False
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 0
+  noise_mode: "episode"
+  use_cuda_graph: True
+  # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
+  # for the length-dummy pad, so business max_batch_size becomes this - 1.
+  max_batch_size: 8
+  strict_pack_match: True
+  # Full embodiment action horizon (simpler_env_widowx delta_indices).
+  chunk_size: 8
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8010

@@ -1,0 +1,29 @@
+# Smoke: 2 episodes on atomic tasks registered in the harness RoboCasa image.
+# That image uses the short names (PnPCounterToCab), not PickPlaceCounterToCabinet.
+server:
+  url: "ws://localhost:8014"
+  timeout: 120.0
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/robocasa:latest
+  gpus: "0,1,2,3,4"
+
+output_dir: "./results_robocasa_pi05"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.robocasa.benchmark:RoboCasaBenchmark"
+    episodes_per_task: 2
+    params:
+      robot: PandaOmron
+      camera_size: 256
+      max_steps: 500
+      split: pretrain
+      seed: 0
+      action_dim: 12
+      tasks:
+        - PnPCounterToCab
+        - PnPCounterToSink
+        - OpenSingleDoor
+        - CloseDoubleDoor
+        - TurnOnSinkFaucet
+        - TurnOnStove

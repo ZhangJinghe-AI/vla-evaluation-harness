@@ -18,21 +18,25 @@
 
 script: "./src/vla_eval/model_servers/pi05-phyai.py"
 args:
+  model_kind: "pi05"
   # checkpoint_path: "/data/share/pi05-libero"
   checkpoint_path: "/data/share/pi05_libero_finetuned_v044"
   # qvla_pack_path: "/data/share/pi05-libero-packs/pi05-libero-W4A4-llm_rotation_none-llm_enable_permute_False-llm_perm_score_act-llm_svd_source_activation-dit_weight_quantizer_gptq-dit_rotation_none-dit_enable_permute_False-dit_perm_score_act-dit_svd_source_activation-calfile.pt"
-  # qvla_pack_path: "/data/share/pi05_libero_finetuned_v044-packs/pi05_libero_finetuned_v044-W4A4-ns10-k8-calfile_goal-newperm-dit_gptq-dit_dynamic-pipeline_hadamard-test4.pt"
-  use_differentiable_forward: False
-  use_eager_attention: False
-  reproducible: True
-  # random = scheduler torch.randn; global = one fixed noise; episode = per-episode hash.
-  noise_mode: "global"
+  qvla_pack_path: "/data/share/qvla-packs-v1/pi05_object-chunksize50-seed0-W16A16_llm_dit-ns120-k4-llm_pipeline_clip-clip_mean_3std_image_mask_median_amax_005-dit_pipeline_clip-clip_mean_3std_all_output_budget_1e3_gc-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   vision_params_dtype: "float16"
   attn_backend: "flashinfer"
   norm_backend: "phyai-kernel"
   linear_backend: "torch"
+  use_differentiable_forward: False
+  use_eager_attention: False
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 30
+  # random = fresh OS-entropy noise; global = one fixed noise; episode = per-episode hash.
+  noise_mode: "episode"
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
   # for the length-dummy pad, so business max_batch_size becomes this - 1.

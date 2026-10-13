@@ -1,12 +1,13 @@
 # LIBERO Object suite (10 tasks × 50 episodes)
 server:
   url: "ws://localhost:8002"
+  timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
-  gpus: "1,4,5"
+  gpus: "0,1,2,3,4"
 
-output_dir: "./results"
+output_dir: "./results_object"
 
 benchmarks:
   - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"

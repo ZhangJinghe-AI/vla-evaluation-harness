@@ -1,0 +1,43 @@
+# PhyAI GR00T-N1.7 model server — LIBERO config (FP / QVLA / differentiable).
+#
+# Optional modes (independent flags, default off):
+#   * `qvla_pack_path` — load a W4A4 pack (build via qvla/scripts/build_groot_pack.py).
+#   * `use_differentiable_forward` — use qvla's differentiable_inference_context
+#     for Fisher/policy-aware calibration. Requires `use_cuda_graph: false`.
+#   * `reproducible` — length-dummy pad (longest suite prompt) + seed/deterministic.
+#     `noise_mode` (required): random | global | episode.
+#
+# Checkpoint = checkpoint_root / model_suite
+# (e.g. .../GR00T-N1.7-LIBERO + libero_goal).
+# Capture task texts are hard-coded in groot-n17-phyai.py.
+# Synthetic capture/dummy images use processor.image_target_size.
+#
+# Build a QVLA pack first via:
+#   python /phyai_workspace/qvla/scripts/build_groot_pack.py \
+#       --checkpoint /data/share/groot-n17-libero \
+#       --output    /data/share/packs/groot_n17_libero_W4A4.pt \
+#       --num-samples 16
+
+script: "./src/vla_eval/model_servers/groot-n17-phyai.py"
+args:
+  model_kind: "groot_n17"
+  checkpoint_root: "/data/share/GR00T-N1.7-LIBERO"
+  model_suite: "libero_goal"
+  embodiment_tag: "LIBERO_PANDA"
+  processor_model_name_or_path: "/data/share/Cosmos-Reason2-2B"
+  qvla_pack_path: "/data/share/qvla-packs/gr00tN17_libero_goal-chunksize16-seed0-W4A4_llm_dit_nvfpxnvfp-ns30-k4-llm_pipeline_clip-clip_mean_3std_image_mask_selective-dit_pipeline_clip-clip_mean_3std_00_025_skipfirst_selective-llm_dit_act_dynamic_perblock_16-test1.pt"
+  device: "cuda"
+  params_dtype: "bfloat16"
+  use_differentiable_forward: False
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 0
+  noise_mode: "episode"
+  use_cuda_graph: True
+  max_batch_size: 8
+  strict_pack_match: True
+  chunk_size: 16
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8004

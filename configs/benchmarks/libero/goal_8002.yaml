@@ -1,0 +1,20 @@
+# LIBERO Goal — model server on :8002, shards → ./results_2
+# Pair with: vla-eval serve --config .../groot_n17/libero.yaml --address 0.0.0.0:8002
+server:
+  url: "ws://localhost:8002"
+  timeout: 120.0
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+  gpus: "0,1,2,3,4"
+
+output_dir: "./results_2"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"
+    subname: libero_goal
+    episodes_per_task: 50
+    params:
+      suite: libero_goal
+      seed: 7
+      num_steps_wait: 10
