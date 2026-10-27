@@ -2,6 +2,8 @@
 #
 # Variant matrix derived from the SimplerEnv evaluation scripts at:
 #   https://github.com/simpler-env/SimplerEnv/tree/main/scripts
+# Official is shader_dir=rt. On this A40: RT+OptiX → black blobs; RT with
+# denoiser off → usable but firefly noise too strong for VLA. Stay on ibl.
 
 server:
   url: ws://localhost:8018

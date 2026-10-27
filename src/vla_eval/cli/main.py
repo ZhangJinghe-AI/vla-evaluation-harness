@@ -202,6 +202,29 @@ def _run_via_docker(
         Path(docker_config_path).unlink(missing_ok=True)
 
 
+def _launch_shards(num_shards: int) -> None:
+    """Run this same CLI once per shard and wait for all of them."""
+    import subprocess
+
+    procs: list[subprocess.Popen[bytes]] = []
+    try:
+        for shard_id in range(num_shards):
+            cmd = [sys.executable, *sys.argv, "--shard-id", str(shard_id)]
+            logger.info("Launching shard %d/%d", shard_id, num_shards)
+            procs.append(subprocess.Popen(cmd))
+        failed = 0
+        for proc in procs:
+            if proc.wait() != 0:
+                failed += 1
+    except BaseException:
+        for proc in procs:
+            proc.terminate()
+        raise
+    if failed:
+        _stderr_console().print(f"[red]ERROR: {failed} of {num_shards} shards failed.[/red]")
+        sys.exit(1)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     """Run evaluation."""
     config = _load_config(args.config)
@@ -216,6 +239,13 @@ def cmd_run(args: argparse.Namespace) -> None:
     if output_dir is not None:
         config["output_dir"] = output_dir
 
+    # CLI override for FP-rollout recording (omit → leave config / default off).
+    # Recording does not change how many episodes run: the YAML episode count
+    # is always completed, and frames are sampled later by export-calibration.
+    rollout_dir = getattr(args, "rollout_dir", None)
+    if rollout_dir is not None:
+        config["rollout_dir"] = rollout_dir
+
     # CLI overrides for benchmark params (applied to all benchmark entries)
     param_overrides = getattr(args, "param", None)
     if param_overrides:
@@ -228,9 +258,19 @@ def cmd_run(args: argparse.Namespace) -> None:
     shard_id = getattr(args, "shard_id", None)
     num_shards = getattr(args, "num_shards", None)
 
-    # Validate shard args
-    if (shard_id is None) != (num_shards is None):
-        _stderr_console().print("[red]ERROR: --shard-id and --num-shards must be used together[/red]")
+    # --num-shards alone launches every shard (rollout recording included).
+    # A child process passes both flags and runs only its own slice.
+    if shard_id is None and num_shards is not None:
+        if num_shards < 1:
+            _stderr_console().print("[red]ERROR: --num-shards must be >= 1[/red]")
+            sys.exit(1)
+        _launch_shards(num_shards)
+        config_stem = Path(args.config).stem
+        merge_output = Path("results") / f"{config_stem}.json"
+        cmd_merge(argparse.Namespace(files=[], config=args.config, output=str(merge_output)))
+        return
+    if shard_id is not None and num_shards is None:
+        _stderr_console().print("[red]ERROR: --shard-id requires --num-shards[/red]")
         sys.exit(1)
     if num_shards is not None:
         if num_shards < 1:
@@ -361,6 +401,141 @@ def _discover_shard_groups(config_path: str) -> dict[str, list[Path]]:
     return groups
 
 
+def _print_rate_line(con: Any, label: str, succ: int, eps: int, n_err: int = 0) -> None:
+    rate = succ / eps if eps else 0.0
+    rc = "green" if rate >= 0.5 else "red"
+    err_tag = f"  [yellow]⚠ {n_err} errors[/yellow]" if n_err else ""
+    con.print(f"  {label:40s} [{rc}]{rate:6.1%}[/{rc}]  ({succ}/{eps}){err_tag}")
+
+
+def _print_macro_rate_line(con: Any, label: str, rate: float, n_tasks: int) -> None:
+    rc = "green" if rate >= 0.5 else "red"
+    con.print(f"  {label:40s} [{rc}]{rate:6.1%}[/{rc}]  (macro over {n_tasks} tasks)")
+
+
+def _print_error_footer(con: Any, suite_rows: list[tuple[str, float, int, int, int]]) -> None:
+    """Signal that some episodes were counted as failures because the run raised."""
+    total = sum(n_err for _name, _rate, _succ, _eps, n_err in suite_rows)
+    if not total:
+        return
+    con.print(
+        f"  [yellow]⚠ {total} episodes failed because of an error, not the model. "
+        "Counted as failures.[/yellow]"
+    )
+
+
+# Paper Google Robot 4-task families (SimplerEnv / GR00T tables).
+_GOOGLE_PAPER_TASKS: tuple[tuple[str, str], ...] = (
+    ("pick_coke_can", "Pick Coke Can"),
+    ("move_near", "Move Near"),
+    ("open_close_drawer", "Open/Close Drawer"),
+    ("place_apple", "Place Apple"),
+)
+
+
+def _google_robot_paper_family(bench_name: str) -> tuple[str, str] | None:
+    """Map a suite-summary row name to ``(protocol, family_key)``.
+
+    ``protocol`` is ``"vm"`` or ``"va"``. Returns ``None`` for non-Google-paper rows
+    (WidowX, LIBERO, etc.).
+    """
+    name = bench_name
+    # VA first — subnames embed ``_va`` (pick_coke_can_va_*, drawer_va_*, …).
+    if "put_in_drawer_va" in name:
+        return "va", "place_apple"
+    if "drawer_va" in name:
+        return "va", "open_close_drawer"
+    if "pick_coke_can_va" in name:
+        return "va", "pick_coke_can"
+    if "move_near_va" in name:
+        return "va", "move_near"
+    # VM paper tasks (exact subname suffixes after ClassName_).
+    if name.endswith("_place_apple_in_closed_top_drawer") or name.endswith(
+        "_google_robot_place_apple_in_closed_top_drawer"
+    ):
+        return "vm", "place_apple"
+    if name.endswith("_open_drawer") or name.endswith("_close_drawer"):
+        return "vm", "open_close_drawer"
+    if name.endswith("_pick_coke_can"):
+        return "vm", "pick_coke_can"
+    if name.endswith("_move_near"):
+        return "vm", "move_near"
+    return None
+
+
+def _print_vm_va_averages(con: Any, suite_rows: list[tuple[str, float, int, int, int]]) -> float | None:
+    """Print Google Robot paper-task VM/VA macros when both protocols are present.
+
+    Layout:
+      VM — 4 task rates, then VM macro average
+      VA — 4 task rates, then VA macro average
+      VM+VA macro average
+
+    Within each paper task, episodes are pooled (open+close drawer, all VA
+    variants). Across the 4 tasks, averages are unweighted macros so VA's many
+    variants do not dominate. Returns the VM+VA macro rate for the Overall line,
+    or ``None`` when this run is not a mixed Google VM+VA suite (caller keeps
+    episode-weighted overall).
+    """
+    buckets: dict[tuple[str, str], list[tuple[str, float, int, int, int]]] = {}
+    for row in suite_rows:
+        mapped = _google_robot_paper_family(row[0])
+        if mapped is None:
+            continue
+        buckets.setdefault(mapped, []).append(row)
+
+    vm_has = any(("vm", key) in buckets for key, _ in _GOOGLE_PAPER_TASKS)
+    va_has = any(("va", key) in buckets for key, _ in _GOOGLE_PAPER_TASKS)
+    if not vm_has or not va_has:
+        # Fallback: episode-weighted VM/VA split for mixed runs that are not
+        # the Google paper 4-task set.
+        vm = [row for row in suite_rows if "_va" not in row[0]]
+        va = [row for row in suite_rows if "_va" in row[0]]
+        if not vm or not va:
+            return None
+        con.print(f"{'─' * 60}")
+        for label, rows in (("VM average", vm), ("VA average", va)):
+            _print_rate_line(
+                con,
+                label,
+                sum(row[2] for row in rows),
+                sum(row[3] for row in rows),
+                sum(row[4] for row in rows),
+            )
+        return None
+
+    def _family_rate(rows: list[tuple[str, float, int, int, int]]) -> tuple[float, int, int, int]:
+        succ = sum(row[2] for row in rows)
+        eps = sum(row[3] for row in rows)
+        err = sum(row[4] for row in rows)
+        return (succ / eps if eps else 0.0), succ, eps, err
+
+    con.print(f"{'─' * 60}")
+    protocol_macros: list[float] = []
+    for protocol, section in (("vm", "VM"), ("va", "VA")):
+        con.print(f"  [bold]{section} (paper 4-task)[/bold]")
+        rates: list[float] = []
+        for key, label in _GOOGLE_PAPER_TASKS:
+            rows = buckets.get((protocol, key), [])
+            if not rows:
+                con.print(f"  {label:40s} [dim]   n/a[/dim]  (no episodes)")
+                continue
+            rate, succ, eps, err = _family_rate(rows)
+            rates.append(rate)
+            _print_rate_line(con, label, succ, eps, err)
+        if rates:
+            macro = sum(rates) / len(rates)
+            protocol_macros.append(macro)
+            _print_macro_rate_line(con, f"{section} average", macro, len(rates))
+        else:
+            con.print(f"  {section + ' average':40s} [dim]   n/a[/dim]")
+        con.print(f"{'─' * 60}")
+
+    if len(protocol_macros) != 2:
+        return None
+    return sum(protocol_macros) / 2.0
+
+
 def cmd_merge(args: argparse.Namespace) -> None:
     """Merge shard result files."""
     import glob
@@ -389,6 +564,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
 
         output_base = Path(args.output) if args.output else None
         merged_count = 0
+        suite_rows: list[tuple[str, float, int, int, int]] = []
         for name, paths in groups.items():
             if not paths:
                 continue
@@ -399,6 +575,12 @@ def cmd_merge(args: argparse.Namespace) -> None:
                 _stderr_console().print(f"[red]ERROR ({name}): {e}[/red]")
                 sys.exit(1)
             print_merge_report(merged)
+            info = merged.get("merge_info") or {}
+            n_eps = int(info.get("total_episodes") or 0)
+            rate = float(merged.get("mean_success") or 0.0)
+            n_succ = int(round(rate * n_eps)) if n_eps else 0
+            n_err = sum(int(task.get("num_errors") or 0) for task in merged.get("tasks", []))
+            suite_rows.append((str(name), rate, n_succ, n_eps, n_err))
             if output_base:
                 if len(groups) == 1:
                     out = output_base
@@ -414,6 +596,28 @@ def cmd_merge(args: argparse.Namespace) -> None:
         if merged_count == 0:
             _stderr_console().print("[red]ERROR: no shard files found[/red]")
             sys.exit(1)
+        if len(suite_rows) > 1:
+            con = _stderr_console()
+            con.print(f"\n{'=' * 60}")
+            con.print("[bold]Suite summary[/bold]")
+            con.print(f"{'=' * 60}")
+            for name, rate, n_succ, n_eps, n_err in suite_rows:
+                _print_rate_line(con, name, n_succ, n_eps, n_err)
+            paper_overall = _print_vm_va_averages(con, suite_rows)
+            con.print(f"{'─' * 60}")
+            if paper_overall is not None:
+                # Google VM+VA: Overall = mean of the two protocol macros.
+                _print_macro_rate_line(con, "Overall average", paper_overall, 2)
+            else:
+                _print_rate_line(
+                    con,
+                    "Overall average",
+                    sum(row[2] for row in suite_rows),
+                    sum(row[3] for row in suite_rows),
+                    sum(row[4] for row in suite_rows),
+                )
+            _print_error_footer(con, suite_rows)
+            con.print(f"{'=' * 60}\n")
         return
 
     # Legacy path: positional file args only
@@ -698,10 +902,12 @@ execution flow:
     is used (e.g. libero_spatial=220, libero_10=520).
     Setting max_steps explicitly in config always takes precedence.
 
-  sharding (--shard-id / --num-shards):
+  sharding:
+    --num-shards N alone launches N processes, then merges.
+    --shard-id / --num-shards together run one slice (used by those processes).
     Work items (task × episode pairs) are distributed round-robin across shards.
-    Each shard writes a deterministic output file: {name}_shard{id}of{total}.json.
-    Use 'vla-eval merge' to combine shard results.
+    Each shard writes {name}_shard{id}of{total}.json.
+    --rollout-dir is safe with sharding: recording does not change episode results.
 
   error recovery:
     Episodes are isolated — one failure does not abort the run.
@@ -719,6 +925,17 @@ execution flow:
         "--output-dir",
         default=None,
         help="Override output directory (default: from config YAML, or ./results/)",
+    )
+    run_parser.add_argument(
+        "--rollout-dir",
+        default=None,
+        help=(
+            "Save FP-policy observations under this directory for later "
+            "'vla-eval export-calibration --rollout-dir'. Omit to leave "
+            "recording off (unless rollout_dir is set in the YAML). "
+            "The YAML episode count still runs to completion. "
+            "Compatible with --num-shards. Recording does not change success rates."
+        ),
     )
     run_parser.add_argument(
         "--param",
@@ -743,10 +960,16 @@ execution flow:
         ),
     )
     run_parser.add_argument(
-        "--shard-id", type=int, default=None, help="Shard index (0-based). Must use with --num-shards."
+        "--shard-id",
+        type=int,
+        default=None,
+        help="Shard index (0-based). Omit to launch every shard from this process.",
     )
     run_parser.add_argument(
-        "--num-shards", type=int, default=None, help="Total number of shards. Must use with --shard-id."
+        "--num-shards",
+        type=int,
+        default=None,
+        help="Split the run into N processes. Pass --shard-id as well to run only one slice.",
     )
     run_parser.add_argument(
         "--gpus",

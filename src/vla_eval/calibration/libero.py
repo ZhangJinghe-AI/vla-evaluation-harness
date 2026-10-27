@@ -1,68 +1,34 @@
-"""
-Version-1 ``.npz`` calibration dataset format (QVLA compatible).
-Replay LIBERO demonstrations and sample observations across each trajectory.
+"""Legacy LIBERO demo-replay calibration export.
+
+Prefer :mod:`vla_eval.calibration.rollout` for FP-policy rollouts across
+libero / calvin / robocasa / robotwin / simpler. This module only replays
+LIBERO demonstration HDF5s.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 
 from vla_eval.benchmarks.libero.benchmark import LIBEROBenchmark
+from vla_eval.calibration.format import (
+    observation_to_calibration_batch,
+    save_calibration_dataset,
+)
+from vla_eval.calibration.sampling import (
+    allocate_phase_quotas,
+    allocate_task_quotas,
+    candidate_indices_for_trajectory,
+)
 
 logger = logging.getLogger(__name__)
 
-CALIBRATION_FILE_VERSION = 1
-Phase = Literal[0, 1, 2]  # early / mid / late
 NUM_EXPORT_TASKS = 10
-
-
-def _batches_to_arrays(batches: list[dict]) -> dict[str, Any]:
-    if not batches:
-        raise ValueError("Cannot save an empty calibration dataset.")
-    images = []
-    wrists = []
-    states = []
-    tasks: list[str] = []
-    for batch in batches:
-        imgs = batch.get("images", {})
-        images.append(np.asarray(imgs["image"], dtype=np.uint8))
-        wrists.append(np.asarray(imgs["wrist_image"], dtype=np.uint8))
-        states.append(np.asarray(batch["states"], dtype=np.float32))
-        tasks.append(str(batch.get("task_description", "")))
-    return {
-        "images": np.stack(images, axis=0),
-        "wrist_images": np.stack(wrists, axis=0),
-        "states": np.stack(states, axis=0),
-        "task_descriptions": np.asarray(tasks, dtype=object),
-    }
-
-
-def save_calibration_dataset(
-    path: str | Path,
-    batches: list[dict],
-    *,
-    meta: dict[str, Any] | None = None,
-) -> Path:
-    """Write a version-1 calibration ``.npz`` file."""
-    path = Path(path).expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    arrays = _batches_to_arrays(batches)
-    header: dict[str, Any] = {
-        "version": CALIBRATION_FILE_VERSION,
-        "num_samples": len(batches),
-    }
-    if meta:
-        header.update(meta)
-    np.savez_compressed(path, **arrays, meta_json=json.dumps(header))
-    logger.info("Wrote %d calibration samples to %s", len(batches), path)
-    return path
 
 
 @dataclass(frozen=True)
@@ -81,9 +47,13 @@ class LiberoExportConfig:
 
 
 def observation_to_pi05_batch(obs: dict, *, state_dim: int = 8) -> dict:
-    """Map harness LIBERO obs → QVLA / pi0.5 processor batch layout."""
-    images = obs.get("images", {})
-    img_list = list(images.values())
+    """Map harness LIBERO obs → legacy two-cam ``image`` / ``wrist_image`` layout.
+
+    Kept for the demo-replay path so existing LIBERO calib consumers stay stable.
+    FP-rollout export should use :func:`observation_to_calibration_batch` instead.
+    """
+    batch = observation_to_calibration_batch(obs, state_dim=state_dim)
+    img_list = list(batch["images"].values())
     image = (
         np.asarray(img_list[0], dtype=np.uint8)
         if len(img_list) > 0
@@ -94,74 +64,11 @@ def observation_to_pi05_batch(obs: dict, *, state_dim: int = 8) -> dict:
         if len(img_list) > 1
         else np.zeros_like(image)
     )
-    states = obs.get("states", obs.get("state", np.zeros(state_dim, dtype=np.float32)))
     return {
         "images": {"image": image, "wrist_image": wrist_image},
-        "states": np.asarray(states, dtype=np.float32),
-        "task_description": str(obs.get("task_description", "")),
+        "states": batch["states"],
+        "task_description": batch["task_description"],
     }
-
-
-def allocate_task_quotas(num_samples: int, num_tasks: int = NUM_EXPORT_TASKS) -> list[int]:
-    """Split ``num_samples`` across tasks as evenly as possible."""
-    if num_tasks <= 0:
-        raise ValueError("num_tasks must be positive.")
-    base, rem = divmod(num_samples, num_tasks)
-    return [base + (i < rem) for i in range(num_tasks)]
-
-
-def allocate_phase_quotas(task_quota: int) -> tuple[int, int, int]:
-    """Split one task's quota across early / mid / late (remainder → early, mid, late)."""
-    if task_quota < 0:
-        raise ValueError("task_quota must be non-negative.")
-    base, rem = divmod(task_quota, 3)
-    quotas = [base, base, base]
-    for i in range(rem):
-        quotas[i] += 1
-    return quotas[0], quotas[1], quotas[2]
-
-
-def phase_of_index(t: int, traj_len: int) -> Phase:
-    """Map frame index to early/mid/late using full trajectory length thirds."""
-    if traj_len <= 0:
-        raise ValueError("traj_len must be positive.")
-    early_end = traj_len // 3
-    mid_end = (2 * traj_len) // 3
-    if t < early_end:
-        return 0
-    if t < mid_end:
-        return 1
-    return 2
-
-
-def candidate_indices_for_demo(
-    traj_len: int,
-    *,
-    chunk_size: int,
-    jitter: int,
-    end_margin: int,
-    rng: random.Random,
-) -> list[tuple[int, Phase]]:
-    """One jittered sample per chunk-aligned anchor; skip near-terminal frames."""
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive.")
-    if jitter < 0:
-        raise ValueError("jitter must be non-negative.")
-    if end_margin < 0:
-        raise ValueError("end_margin must be non-negative.")
-    if traj_len < 2:
-        return []
-
-    usable = traj_len - end_margin
-    if usable <= 0:
-        return []
-
-    out: list[tuple[int, Phase]] = []
-    for anchor in range(0, usable, chunk_size):
-        delta = rng.randint(-jitter, jitter) if jitter > 0 else 0
-        t = min(max(anchor + delta, 0), usable - 1)
-        out.append((t, phase_of_index(t, traj_len)))
-    return out
 
 
 def _list_demo_names(demo_path: Path, max_episodes: int) -> list[str]:
@@ -212,7 +119,7 @@ def _select_picks_for_task(
         if all(len(pools[p]) >= phase_quotas[p] for p in range(3)):
             break
         states = _load_demo_states(demo_path, demo_name)
-        for t, phase in candidate_indices_for_demo(
+        for t, phase in candidate_indices_for_trajectory(
             len(states),
             chunk_size=cfg.chunk_size,
             jitter=cfg.jitter,
@@ -274,7 +181,6 @@ def collect_libero_batches(cfg: LiberoExportConfig, num_samples: int) -> list[di
         selected_tasks = rng.sample(tasks, NUM_EXPORT_TASKS)
         task_quotas = allocate_task_quotas(num_samples, NUM_EXPORT_TASKS)
 
-        # Cache states per (demo_path, demo_name) while rendering picks.
         state_cache: dict[tuple[str, str], np.ndarray] = {}
 
         for task, task_quota in zip(selected_tasks, task_quotas):
@@ -329,7 +235,7 @@ def export_libero_dataset(
     num_samples: int = 30,
     config: LiberoExportConfig,
 ) -> Path:
-    """Export replayed LIBERO demo observations to a version-1 ``.npz`` file."""
+    """Export replayed LIBERO demo observations to a calibration ``.npz``."""
     batches = collect_libero_batches(config, num_samples)
     return save_calibration_dataset(
         output,
@@ -351,14 +257,8 @@ def export_libero_dataset(
 
 
 __all__ = [
-    "CALIBRATION_FILE_VERSION",
     "NUM_EXPORT_TASKS",
-    "save_calibration_dataset",
     "LiberoExportConfig",
-    "allocate_task_quotas",
-    "allocate_phase_quotas",
-    "phase_of_index",
-    "candidate_indices_for_demo",
     "collect_libero_batches",
     "export_libero_dataset",
     "observation_to_pi05_batch",

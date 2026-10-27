@@ -26,6 +26,7 @@ Success modes (set via model server ``get_observation_params()``):
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from itertools import product
 from typing import Any
 
@@ -36,34 +37,97 @@ from vla_eval.specs import GRIPPER_CLOSE_POS, IMAGE_RGB, LANGUAGE, POSITION_DELT
 from vla_eval.types import Action, EpisodeResult, Observation, Task
 
 
+# One Vulkan device per process. Each SimplerEnv task builds a new env, and
+# ManiSkill's close() does not destroy SapienRenderer. A fresh renderer every
+# episode exhausts the driver (ErrorInitializationFailed / OutOfHostMemory).
+_SIMPLER_RENDERER: dict[str, Any] = {"renderer": None}
+
+
+def _cached_renderer_factory(holder: dict[str, Any], original: Any) -> Any:
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        renderer = holder.get("renderer")
+        if renderer is None:
+            renderer = original(*args, **kwargs)
+            holder["renderer"] = renderer
+        return renderer
+
+    return factory
+
+
+@contextmanager
+def _reused_simpler_renderer():
+    """Return the process ``SapienRenderer`` from ManiSkill's ``sapien.core`` lookup."""
+    import sapien
+    import sapien.core as sapien_core
+
+    modules = [module for module in (sapien_core, sapien) if hasattr(module, "SapienRenderer")]
+    original = {module: module.SapienRenderer for module in modules}
+    factory = _cached_renderer_factory(_SIMPLER_RENDERER, original[modules[0]])
+    for module in modules:
+        module.SapienRenderer = factory
+    try:
+        yield
+    finally:
+        for module, renderer_cls in original.items():
+            module.SapienRenderer = renderer_cls
+
+
 def _linspace_from_range(spec: list[float]) -> np.ndarray:
     """Convert ``[start, end, n]`` to ``np.linspace(start, end, int(n))``."""
     return np.linspace(spec[0], spec[1], int(spec[2]))
 
 
-def _use_ibl_shader_for_drawers() -> None:
-    """Drawer visual-matching defaults to the RT shader.
+def _patch_drawer_prepackaged_shader(mode: str = "ibl") -> None:
+    """Override drawer VM prepackaged ``shader_dir`` / denoiser.
 
-    On this GPU OptiX denoising fails and the cabinet/robot foreground
-    renders as a black blob, so the policy never sees the drawer. Pick-coke
-    uses the default ``ibl`` shader and renders the arm. Keep that shader
-    for drawer tasks too.
+    Official SimplerEnv uses ``shader_dir=rt`` with OptiX denoising.
+    On A40, ``rt_use_denoiser=True`` fails (OPTIX_ERROR_*) and paints the
+    cabinet/robot as a black blob (smoke scored 0/6). Modes:
+
+    - ``ibl``: force ``shader_dir=ibl`` (stable default on this host).
+    - ``rt_no_denoiser``: keep ``shader_dir=rt`` but set
+      ``render_config.rt_use_denoiser=False`` (option-1 smoke / closer to
+      official lighting without OptiX).
+    - ``rt``: leave prepackaged defaults (official; may black-blob here).
     """
     from mani_skill2_real2sim.envs.custom_scenes.open_drawer_in_scene import (
         OpenDrawerInSceneEnv,
     )
 
-    if getattr(OpenDrawerInSceneEnv, "_vla_ibl_shader", False):
+    if mode not in ("ibl", "rt", "rt_no_denoiser"):
+        raise ValueError(
+            f"Invalid drawer_shader={mode!r}. Expected: ibl, rt, rt_no_denoiser"
+        )
+    applied = getattr(OpenDrawerInSceneEnv, "_vla_drawer_shader_mode", None)
+    if applied == mode:
         return
+    if applied is not None:
+        raise RuntimeError(
+            f"Drawer shader already patched to {applied!r}; cannot switch to {mode!r} "
+            "in the same process. Restart the eval process."
+        )
+
     original = OpenDrawerInSceneEnv._setup_prepackaged_env_init_config
 
-    def _ibl_config(self):
+    def _patched_config(self):
         config = original(self)
-        config["shader_dir"] = "ibl"
+        if mode == "ibl":
+            config["shader_dir"] = "ibl"
+        elif mode == "rt_no_denoiser":
+            config["shader_dir"] = "rt"
+            render_config = dict(config.get("render_config") or {})
+            render_config["rt_use_denoiser"] = False
+            config["render_config"] = render_config
+        # mode == "rt": keep official prepackaged defaults
         return config
 
-    OpenDrawerInSceneEnv._setup_prepackaged_env_init_config = _ibl_config
-    OpenDrawerInSceneEnv._vla_ibl_shader = True
+    OpenDrawerInSceneEnv._setup_prepackaged_env_init_config = _patched_config
+    OpenDrawerInSceneEnv._vla_drawer_shader_mode = mode
+
+
+def _use_ibl_shader_for_drawers() -> None:
+    """Backward-compatible alias: force drawer VM to ``ibl``."""
+    _patch_drawer_prepackaged_shader("ibl")
 
 
 def _enable_physx_enhanced_determinism() -> None:
@@ -118,6 +182,10 @@ class SimplerEnvBenchmark(StepBenchmark):
             ``robot_rot_quat`` ([x, y, z, w] quaternion),
             ``obj_x/obj_y`` ([start, end, n] linspace, xy mode),
             ``obj_episode_range`` ([start, end) end-exclusive, episode mode).
+        drawer_shader: VM drawer prepackaged shader override.  ``ibl``
+            (default, stable on A40), ``rt_no_denoiser`` (RT without
+            OptiX), or ``rt`` (official defaults). Ignored for non-drawer
+            tasks and for VA (use ``env_build_kwargs`` there).
     """
 
     def __init__(
@@ -134,12 +202,16 @@ class SimplerEnvBenchmark(StepBenchmark):
         scene_name: str | None = None,
         env_build_kwargs: dict[str, Any] | None = None,
         init_config: dict[str, Any] | None = None,
+        drawer_shader: str = "ibl",
     ) -> None:
         super().__init__()
         assert success_mode in ("truncation", "early_stop", "accumulate"), (
             f"Invalid success_mode={success_mode!r}. Expected: truncation, early_stop, accumulate"
         )
         assert gripper_mode in ("binary", "sticky"), f"Invalid gripper_mode={gripper_mode!r}. Expected: binary, sticky"
+        assert drawer_shader in ("ibl", "rt", "rt_no_denoiser"), (
+            f"Invalid drawer_shader={drawer_shader!r}. Expected: ibl, rt, rt_no_denoiser"
+        )
         self.task_name = task_name
         self.max_episode_steps = max_episode_steps
         self.success_mode = success_mode
@@ -150,6 +222,7 @@ class SimplerEnvBenchmark(StepBenchmark):
         self.gripper_mode = gripper_mode
         self.env_name = env_name
         self.scene_name = scene_name
+        self.drawer_shader = drawer_shader
         self.env_build_kwargs = env_build_kwargs or {}
 
         self._env: Any = None
@@ -221,12 +294,25 @@ class SimplerEnvBenchmark(StepBenchmark):
         }
 
     def cleanup(self) -> None:
-        if self._env is not None:
+        self._release_env()
+
+    def _release_env(self) -> None:
+        """Drop this episode's scene and keep the process renderer."""
+        env = self._env
+        self._env = None
+        if env is None:
+            return
+        raw = getattr(env, "unwrapped", env)
+        scene = getattr(raw, "_scene", None)
+        if scene is not None:
             try:
-                self._env.close()
+                scene.clear()
             except Exception:
                 pass
-            self._env = None
+        try:
+            env.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Benchmark ABC
@@ -244,13 +330,13 @@ class SimplerEnvBenchmark(StepBenchmark):
         self._sticky_action_is_on = False
         self._sticky_gripper_action = 0.0
         self._gripper_action_repeat = 0
-        if self._env is not None:
-            self._env.close()
+        self._release_env()
 
-        if self.env_name is not None:
-            self._env, reset_kwargs = self._make_va_env(task)
-        else:
-            self._env, reset_kwargs = self._make_vm_env(task)
+        with _reused_simpler_renderer():
+            if self.env_name is not None:
+                self._env, reset_kwargs = self._make_va_env(task)
+            else:
+                self._env, reset_kwargs = self._make_vm_env(task)
         # A new env is built every episode, which restarts ManiSkill's main RNG
         # at its default seed. reset(seed=None) then repeats the same drawer,
         # overlay, and robot pose. Official GoogleFractalEnv forwards a seed.
@@ -313,7 +399,7 @@ class SimplerEnvBenchmark(StepBenchmark):
 
         _enable_physx_enhanced_determinism()
         if "drawer" in self.task_name:
-            _use_ibl_shader_for_drawers()
+            _patch_drawer_prepackaged_shader(self.drawer_shader)
         env = simpler_env.make(self.task_name, **self._common_make_kwargs())
 
         # deterministic_episodes=True: pass episode_id for reproducible

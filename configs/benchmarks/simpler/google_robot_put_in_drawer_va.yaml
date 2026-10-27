@@ -2,9 +2,11 @@
 #
 # Variant matrix derived from the SimplerEnv evaluation scripts at:
 #   https://github.com/simpler-env/SimplerEnv/tree/main/scripts
+# Official put-in-drawer VA uses ray-tracing + model_ids=apple; on this host
+# Stay on ibl (same as drawer VA; RT no-denoise too noisy on this A40).
 
 server:
-  url: ws://localhost:8018
+  url: ws://localhost:8004
   timeout: 120.0
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest

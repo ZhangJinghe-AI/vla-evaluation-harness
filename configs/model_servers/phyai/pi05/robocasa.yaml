@@ -6,6 +6,7 @@ script: "./src/vla_eval/model_servers/pi05-phyai.py"
 args:
   model_kind: "pi05"
   checkpoint_path: "/data/share/pi05_robocasa"
+  # qvla_pack_path: "/data/share/qvla-packs-v1/pi05_robocasa-chunksize50-seed0-reproducible_noise-W4A4_llm_dit_nvfpxnvfp-cal_rollout_v2-ns120-k1-llm_pipeline_none-dit_pipeline_none-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   vision_params_dtype: "float16"
@@ -22,9 +23,9 @@ args:
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
   # for the length-dummy pad, so business max_batch_size becomes this - 1.
-  max_batch_size: 8
+  max_batch_size: 4
   strict_pack_match: True
   chunk_size: 50
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8014
+  port: 8004

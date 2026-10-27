@@ -8,16 +8,19 @@ import random
 import numpy as np
 import pytest
 
+from vla_eval.calibration.format import CALIBRATION_FILE_VERSION, save_calibration_dataset
 from vla_eval.calibration.libero import (
-    CALIBRATION_FILE_VERSION,
     LiberoExportConfig,
-    allocate_phase_quotas,
-    allocate_task_quotas,
-    candidate_indices_for_demo,
     collect_libero_batches,
     observation_to_pi05_batch,
+)
+from vla_eval.calibration.sampling import (
+    allocate_phase_quotas,
+    allocate_task_quotas,
+    assign_shuffled_quotas,
+    calibration_group,
+    candidate_indices_for_demo,
     phase_of_index,
-    save_calibration_dataset,
 )
 
 
@@ -50,7 +53,32 @@ def test_save_calibration_npz_roundtrip(tmp_path):
     with np.load(path, allow_pickle=True) as data:
         meta = json.loads(str(data["meta_json"]))
         assert meta["version"] == CALIBRATION_FILE_VERSION
-        assert data["images"].shape == (1, 8, 8, 3)
+        assert [str(k) for k in data["camera_keys"].tolist()] == ["image", "wrist_image"]
+        assert data["camera_images"].shape == (1, 2, 8, 8, 3)
+
+
+def test_save_calibration_npz_three_cameras(tmp_path):
+    batches = [
+        {
+            "images": {
+                "head_camera": np.zeros((4, 4, 3), dtype=np.uint8),
+                "left_camera": np.ones((4, 4, 3), dtype=np.uint8),
+                "right_camera": np.full((4, 4, 3), 2, dtype=np.uint8),
+            },
+            "states": np.zeros(14, dtype=np.float32),
+            "task_description": "robotwin",
+        }
+    ]
+    path = tmp_path / "calib.npz"
+    save_calibration_dataset(path, batches, meta={"source": "rollout"})
+    with np.load(path, allow_pickle=True) as data:
+        assert [str(k) for k in data["camera_keys"].tolist()] == [
+            "head_camera",
+            "left_camera",
+            "right_camera",
+        ]
+        assert data["camera_images"].shape == (1, 3, 4, 4, 3)
+        assert data["states"].shape == (1, 14)
 
 
 def test_allocate_task_quotas_even_split():
@@ -60,10 +88,35 @@ def test_allocate_task_quotas_even_split():
     assert allocate_task_quotas(125, 10)[5:] == [12, 12, 12, 12, 12]
 
 
+def test_shuffled_quotas_do_not_keep_alphabetical_prefix():
+    names = ["a", "b", "c", "d"]
+    quotas = assign_shuffled_quotas(2, names, random.Random(0))
+    assert sum(quotas.values()) == 2
+    assert sorted(name for name, quota in quotas.items() if quota) == ["a", "c"]
+
+
+def test_calibration_group_uses_prompt_only_when_prompts_cross_tasks():
+    assert calibration_group({"pick": {"lift the can"}}) == "task"
+    assert (
+        calibration_group(
+            {
+                "seq_0000": {"open", "close"},
+                "seq_0001": {"open", "close"},
+            }
+        )
+        == "prompt"
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        calibration_group({"a": {"shared"}, "b": {"shared", "only_b"}})
+
+
 def test_allocate_phase_quotas_balanced():
+    # Return order is early, mid, late. Remainder fills mid, then late, then early.
     assert allocate_phase_quotas(12) == (4, 4, 4)
-    assert allocate_phase_quotas(11) == (4, 4, 3)
-    assert allocate_phase_quotas(10) == (4, 3, 3)
+    assert allocate_phase_quotas(11) == (3, 4, 4)
+    assert allocate_phase_quotas(10) == (3, 4, 3)
+    assert allocate_phase_quotas(2) == (0, 1, 1)
+    assert allocate_phase_quotas(1) == (0, 1, 0)
 
 
 def test_phase_of_index_thirds():

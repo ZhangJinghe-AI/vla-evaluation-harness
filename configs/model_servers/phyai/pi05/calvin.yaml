@@ -25,6 +25,7 @@ args:
   openpi_discrete_state: false
   # Training config num_steps is 10 (flow integration), not the generic eval default of 5.
   openpi_num_inference_steps: 10
+  qvla_pack_path: "/data/share/qvla-packs-v1/pi05_calvin-chunksize5-seed0-reproducible_noise-W4A4_llm_dit_nvfpxnvfp-cal_rollout_v2-ns120-k1-llm_pipeline_clip-clip_mean_3std_image_mask_median_amax_005-dit_pipeline_clip-clip_mean_3std_all_output_budget_1e3_gc_b8-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   vision_params_dtype: "float16"
@@ -46,4 +47,4 @@ args:
   chunk_size: 5
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8012
+  port: 8002

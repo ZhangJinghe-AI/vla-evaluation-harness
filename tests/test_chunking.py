@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from vla_eval.model_servers.base import SessionContext
 from vla_eval.model_servers.chunking import ActionChunkBuffer, get_ensemble_fn
+from vla_eval.model_servers.predict import PredictModelServer
 
 
 def test_chunk_buffer_basic():
@@ -39,3 +42,39 @@ def test_callable_ensemble():
 
     fn = get_ensemble_fn(my_fn)
     assert fn is my_fn
+
+
+class _CountingChunkServer(PredictModelServer):
+    """Returns a fixed chunk; counts how often predict() runs."""
+
+    def __init__(self) -> None:
+        super().__init__(chunk_size=4, max_batch_size=1)
+        self.predict_calls = 0
+        self._chunk = np.arange(28, dtype=np.float32).reshape(4, 7)
+
+    def predict(self, obs, ctx):
+        self.predict_calls += 1
+        return {"actions": self._chunk.copy()}
+
+
+@pytest.mark.anyio
+async def test_language_change_flushes_open_loop_chunk():
+    """Mid-episode prompt change must force a new predict() under chunk_size>1."""
+    server = _CountingChunkServer()
+    ctx = SessionContext(session_id="s", episode_id="e", mode="sync")
+    sent: list[np.ndarray] = []
+
+    async def _capture(action: dict) -> None:
+        sent.append(np.asarray(action["actions"]))
+
+    ctx._send_action_fn = _capture
+
+    await server.on_episode_start({}, ctx)
+    await server.on_observation({"task_description": "open top drawer"}, ctx)
+    await server.on_observation({"task_description": "open top drawer"}, ctx)
+    assert server.predict_calls == 1
+    assert len(sent) == 2
+
+    await server.on_observation({"task_description": "place apple into top drawer"}, ctx)
+    assert server.predict_calls == 2
+    assert len(sent) == 3

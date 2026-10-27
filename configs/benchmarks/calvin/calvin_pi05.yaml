@@ -1,11 +1,11 @@
-# Smoke: 10 sequences. The full ABC→D protocol is num_sequences: 1000.
+# Medium run: num_sequences: 100 (full ABC→D protocol is 1000).
 server:
-  url: "ws://localhost:8012"
+  url: "ws://localhost:8002"
   timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/calvin:latest
-  gpus: "0,1,2,3,4"
+  gpus: "0,1,4"
   env:
     - "NVIDIA_DRIVER_CAPABILITIES=all"
 
@@ -16,7 +16,7 @@ benchmarks:
     episodes_per_task: 1
     params:
       dataset_path: "/data/calvin/dataset/validation"
-      num_sequences: 10
+      num_sequences: 100
       seed: 0
       # RLinf official calvin_eval.py protocol: 480 steps per subtask.
       ep_len: 480

@@ -1,22 +1,89 @@
-# Smoke: 5 episodes of one task. Raise test_num after the success rate looks alive.
+# RoboTwin 2.0 eval for pi0.5 (clean+randomize checkpoint).
+# Easy = demo_clean, Hard = demo_randomized. 50 tasks × 5 episodes each
+# (full protocol is usually 50–100; 5 is a faster proxy).
+# Episode count is episodes_per_task. Episode i searches seeds
+# 100000 + i*100, 100000 + i*100 + 1, ... and keeps the first stable scene.
 server:
-  url: "ws://localhost:8016"
+  url: "ws://localhost:8002"
   timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/robotwin:latest
-  gpus: "0,1,2,3,4"
+  gpus: "0,1,4"
 
 output_dir: "./results_robotwin_pi05"
 
+_shared_tasks: &robotwin_tasks
+  - adjust_bottle
+  - beat_block_hammer
+  - blocks_ranking_rgb
+  - blocks_ranking_size
+  - click_alarmclock
+  - click_bell
+  - dump_bin_bigbin
+  - grab_roller
+  - handover_block
+  - handover_mic
+  - hanging_mug
+  - lift_pot
+  - move_can_pot
+  - move_pillbottle_pad
+  - move_playingcard_away
+  - move_stapler_pad
+  - open_laptop
+  - open_microwave
+  - pick_diverse_bottles
+  - pick_dual_bottles
+  - place_a2b_left
+  - place_a2b_right
+  - place_bread_basket
+  - place_bread_skillet
+  - place_burger_fries
+  - place_can_basket
+  - place_cans_plasticbox
+  - place_container_plate
+  - place_dual_shoes
+  - place_empty_cup
+  - place_fan
+  - place_mouse_pad
+  - place_object_basket
+  - place_object_scale
+  - place_object_stand
+  - place_phone_stand
+  - place_shoe
+  - press_stapler
+  - put_bottles_dustbin
+  - put_object_cabinet
+  - rotate_qrcode
+  - scan_object
+  - shake_bottle
+  - shake_bottle_horizontally
+  - stack_blocks_three
+  - stack_blocks_two
+  - stack_bowls_three
+  - stack_bowls_two
+  - stamp_seal
+  - turn_switch
+
 benchmarks:
   - benchmark: "vla_eval.benchmarks.robotwin.benchmark:RoboTwinBenchmark"
-    episodes_per_task: 1
+    subname: easy
+    episodes_per_task: 5
     params:
-      task_name: grab_roller
+      task_names: *robotwin_tasks
       task_config: demo_clean
       seed: 0
       instruction_type: seen
-      test_num: 5
+      skip_expert_check: true
+    action_dim: 14
+
+  - benchmark: "vla_eval.benchmarks.robotwin.benchmark:RoboTwinBenchmark"
+    subname: hard
+    episodes_per_task: 5
+    params:
+      task_names: *robotwin_tasks
+      task_config: demo_randomized
+      seed: 0
+      instruction_type: seen
       skip_expert_check: true
     action_dim: 14

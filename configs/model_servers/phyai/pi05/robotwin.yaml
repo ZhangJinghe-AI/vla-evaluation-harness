@@ -24,7 +24,7 @@ args:
   reproducible: True
   # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
   # Ignored when noise_mode is random. Only applied when reproducible is true.
-  inference_seed: 0
+  inference_seed: 10
   noise_mode: "episode"
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
@@ -34,4 +34,4 @@ args:
   chunk_size: 32
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8016
+  port: 8002

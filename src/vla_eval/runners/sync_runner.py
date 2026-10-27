@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from typing import Any
 
 from vla_eval.benchmarks.base import Benchmark
 from vla_eval.runners.base import EpisodeRunner
 from vla_eval.types import EpisodeResult, Task
+
+logger = logging.getLogger(__name__)
 
 
 class SyncEpisodeRunner(EpisodeRunner):
@@ -38,8 +41,7 @@ class SyncEpisodeRunner(EpisodeRunner):
         try:
             await benchmark.start_episode(task)
             obs_dict = await benchmark.get_observation()
-            if rollout_recorder is not None:
-                rollout_recorder.note(obs_dict)
+            self._note_rollout(rollout_recorder, obs_dict)
 
             # Send only serializable task info to the model server
             task_info = {k: v for k, v in task.items() if isinstance(v, (str, int, float, bool, list))}
@@ -52,21 +54,38 @@ class SyncEpisodeRunner(EpisodeRunner):
                 if await benchmark.is_done():
                     break
                 obs_dict = await benchmark.get_observation()
-                if rollout_recorder is not None:
-                    rollout_recorder.note(obs_dict)
+                self._note_rollout(rollout_recorder, obs_dict)
 
             elapsed = await benchmark.get_time()
             metrics = await benchmark.get_result()
             episode_result: dict = {"metrics": metrics, "steps": step + 1, "elapsed_sec": round(elapsed, 3)}
 
             await conn.end_episode(episode_result)
-            if rollout_recorder is not None:
-                rollout_recorder.flush(
-                    task,
-                    success=bool(episode_result["metrics"].get("success", False)),
-                )
+            self._flush_rollout(
+                rollout_recorder,
+                task,
+                success=bool(episode_result["metrics"].get("success", False)),
+            )
             return episode_result
         except Exception:
             if rollout_recorder is not None:
                 rollout_recorder.discard()
             raise
+
+    @staticmethod
+    def _note_rollout(rollout_recorder: Any, obs_dict: dict) -> None:
+        if rollout_recorder is None:
+            return
+        try:
+            rollout_recorder.note(obs_dict)
+        except Exception:
+            logger.exception("Rollout note failed; evaluation continues")
+
+    @staticmethod
+    def _flush_rollout(rollout_recorder: Any, task: Task, *, success: bool) -> None:
+        if rollout_recorder is None:
+            return
+        try:
+            rollout_recorder.flush(task, success=success)
+        except Exception:
+            logger.exception("Rollout flush failed; evaluation result is unchanged")

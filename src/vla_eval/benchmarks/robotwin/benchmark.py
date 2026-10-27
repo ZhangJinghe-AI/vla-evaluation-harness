@@ -31,6 +31,20 @@ from vla_eval.types import Action, EpisodeResult, Observation, Task
 logger = logging.getLogger(__name__)
 
 ROBOTWIN_ROOT = "/app/RoboTwin"
+# Each episode owns 100 consecutive seeds. Attempt 0 is the lane start.
+# UnStableError tries the next seed in that lane, so the same episode index
+# always settles on the same stable scene.
+ROBOTWIN_SEED_LANE = 100
+
+
+def robotwin_episode_seed(task: dict[str, Any], attempt: int) -> int:
+    """Seed for one episode attempt. Lanes do not overlap."""
+    if attempt < 0 or attempt >= ROBOTWIN_SEED_LANE:
+        raise ValueError(f"Seed attempt must be in [0, {ROBOTWIN_SEED_LANE}).")
+    episode_idx = int(task.get("episode_idx", 0))
+    if "seed_base" in task:
+        return int(task["seed_base"]) + episode_idx * ROBOTWIN_SEED_LANE + attempt
+    return int(task["seed"]) + attempt
 
 # Motion helpers that must not run during instruction-placeholder recovery.
 _MOTION_STUB_NAMES = (
@@ -201,26 +215,90 @@ def _strip_instruction_markup(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
-def _release_robotwin_env(env: Any) -> None:
-    """Free the Sapien ray-traced renderer before the next episode.
+@contextmanager
+def _reused_sapien_renderer(holder: dict[str, Any]):
+    """Return one ``SapienRenderer`` for every RoboTwin ``setup_demo`` in this process.
 
-    ``gym.Env.close`` does not destroy the engine. Each episode creates a new
-    renderer, and after a few dozen of them Vulkan returns
-    ``ErrorOutOfHostMemory``. Later tasks then die in ``SapienRenderer()``
-    and the harness records that crash as a failed episode.
+    RoboTwin calls ``sapien.core.SapienRenderer()`` inside ``setup_scene``.
+    ``close`` does not destroy that object, so a new one per episode exhausts
+    Vulkan host memory. Later calls return the renderer stored in ``holder``.
+    Ray-tracing settings stay on the shader path RoboTwin already sets.
     """
+    import sapien
+    import sapien.core as sapien_core
+
+    modules = [module for module in (sapien_core, sapien) if hasattr(module, "SapienRenderer")]
+    original = {module: module.SapienRenderer for module in modules}
+    factory = _cached_renderer_factory(holder, original[modules[0]])
+    for module in modules:
+        module.SapienRenderer = factory
+    try:
+        yield
+    finally:
+        for module, renderer_cls in original.items():
+            module.SapienRenderer = renderer_cls
+
+
+def _cached_renderer_factory(holder: dict[str, Any], original: Any) -> Any:
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        renderer = holder.get("renderer")
+        if renderer is None:
+            renderer = original(*args, **kwargs)
+            holder["renderer"] = renderer
+        return renderer
+
+    return factory
+
+
+def _clear_robotwin_scene(env: Any) -> None:
+    """Drop the previous scene so a reused renderer does not keep its cameras."""
     if env is None:
         return
+    scene = getattr(env, "scene", None)
+    if scene is None:
+        return
+    try:
+        scene.clear()
+    except Exception:
+        pass
+    try:
+        env.scene = None
+    except Exception:
+        pass
+
+
+def _release_robotwin_env(
+    env: Any,
+    *,
+    renderer_holder: dict[str, Any] | None = None,
+    drop_renderer: bool = False,
+) -> None:
+    """Free this episode's scene and keep the process renderer.
+
+    ``drop_renderer`` is only for a Vulkan crash retry and for process
+    cleanup. A normal episode keeps the renderer in ``renderer_holder``.
+    """
+    if env is None:
+        if drop_renderer and renderer_holder is not None:
+            renderer_holder["renderer"] = None
+        return
+    _clear_robotwin_scene(env)
     try:
         env.close_env(clear_cache=False)
     except Exception:
         pass
+    if renderer_holder is not None and not drop_renderer:
+        renderer = getattr(env, "renderer", None)
+        if renderer is not None and renderer_holder.get("renderer") is None:
+            renderer_holder["renderer"] = renderer
     for name in ("viewer", "cameras", "robot", "scene", "renderer", "engine"):
         if hasattr(env, name):
             try:
                 setattr(env, name, None)
             except Exception:
                 pass
+    if drop_renderer and renderer_holder is not None:
+        renderer_holder["renderer"] = None
     try:
         from sapien.render import clear_cache
 
@@ -242,6 +320,8 @@ def _is_renderer_crash(exc: BaseException) -> bool:
             "physical device",
             "SapienRenderer",
             "createFenceUnique",
+            "createSemaphoreUnique",
+            "cannot create buffer",
         )
     )
 
@@ -369,6 +449,7 @@ class RoboTwinBenchmark(StepBenchmark):
         self._env: Any = None
         self._env_class: Any = None
         self._args: dict[str, Any] | None = None
+        self._sapien_renderer: dict[str, Any] = {"renderer": None}
 
     # -----------------------------------------------------------------
     # Lazy init
@@ -444,7 +525,11 @@ class RoboTwinBenchmark(StepBenchmark):
     def cleanup(self) -> None:
         env = self._env
         self._env = None
-        _release_robotwin_env(env)
+        _release_robotwin_env(
+            env,
+            renderer_holder=self._sapien_renderer,
+            drop_renderer=True,
+        )
 
     # -----------------------------------------------------------------
     # StepBenchmark interface
@@ -456,18 +541,19 @@ class RoboTwinBenchmark(StepBenchmark):
         st_seed = 100000 * (1 + self.seed)
 
         if self.skip_expert_check:
+            # One task per name. Episode count comes from episodes_per_task;
+            # reset() turns episode_idx into a distinct seed.
             return [
                 {
                     "name": name,
                     "suite": "robotwin",
-                    "seed": st_seed + i,
-                    "episode_idx": i,
-                    "task_id": st_seed + i,
+                    "seed_base": st_seed,
+                    "episode_idx": 0,
+                    "task_id": st_seed,
                     # Placeholder; reset() rebuilds a seen-template instruction.
                     "instruction": f"Perform the {name} task.",
                 }
                 for name in self.task_names
-                for i in range(self.test_num)
             ]
 
         # Full expert check — same protocol as RoboTwin eval_policy.py:
@@ -488,12 +574,14 @@ class RoboTwinBenchmark(StepBenchmark):
             try:
                 while episode_idx < self.test_num:
                     try:
-                        env.setup_demo(
-                            now_ep_num=episode_idx,
-                            seed=now_seed,
-                            is_test=True,
-                            **self._args,
-                        )
+                        _clear_robotwin_scene(env)
+                        with _reused_sapien_renderer(self._sapien_renderer):
+                            env.setup_demo(
+                                now_ep_num=episode_idx,
+                                seed=now_seed,
+                                is_test=True,
+                                **self._args,
+                            )
                         episode_info = env.play_once()
                         env.close_env()
                         if env.plan_success and env.check_success():
@@ -532,7 +620,7 @@ class RoboTwinBenchmark(StepBenchmark):
                             pass
                     now_seed += 1
             finally:
-                _release_robotwin_env(env)
+                _release_robotwin_env(env, renderer_holder=self._sapien_renderer)
         return tasks
 
     def _use_task(self, task_name: str) -> None:
@@ -554,42 +642,64 @@ class RoboTwinBenchmark(StepBenchmark):
         if self._env is not None:
             previous = self._env
             self._env = None
-            _release_robotwin_env(previous)
+            _release_robotwin_env(previous, renderer_holder=self._sapien_renderer)
 
-        # Always use the seed assigned in get_tasks(). Bumping the seed on
-        # UnStableError / renderer crash made the same episode_idx land on
-        # different scenes across runs.
-        seed = int(task["seed"])
+        # skip_expert_check stores seed_base. Episode i searches a private
+        # lane of 100 seeds, in order, and keeps the first stable one.
+        # The search order is fixed, so a rerun uses the same scene.
         last_error: Exception | None = None
-        max_attempts = 3
-        for attempt in range(max_attempts):
+        seed = robotwin_episode_seed(task, 0)
+        render_retries = 0
+        drop_renderer = False
+        attempt = 0
+        raw_obs: Any = None
+        while attempt < ROBOTWIN_SEED_LANE:
+            seed = robotwin_episode_seed(task, attempt)
             if self._env is not None:
                 previous = self._env
                 self._env = None
-                _release_robotwin_env(previous)
+                _release_robotwin_env(
+                    previous,
+                    renderer_holder=self._sapien_renderer,
+                    drop_renderer=drop_renderer,
+                )
+                drop_renderer = False
             self._env = self._create_env()
             try:
-                with _patched_robot_set_planner(self.fast_init), _patched_render_setup(self.fast_render):
+                with (
+                    _patched_robot_set_planner(self.fast_init),
+                    _patched_render_setup(self.fast_render),
+                    _reused_sapien_renderer(self._sapien_renderer),
+                ):
                     self._env.setup_demo(
                         now_ep_num=task.get("episode_idx", 0),
                         seed=seed,
                         is_test=True,
                         **self._args,
                     )
+                # Camera buffers are allocated on the first get_obs. That can
+                # raise "cannot create buffer" after setup_demo already passed.
+                task["seed"] = seed
+                instruction = self._instruction_for_episode(task)
+                task["instruction"] = instruction
+                self._env.set_instruction(instruction=instruction)
+                raw_obs = self._env.get_obs()
                 break
             except Exception as exc:
                 last_error = exc
                 if type(exc).__name__ == "UnStableError":
                     logger.warning(
-                        "Unstable RoboTwin seed %s for %s (attempt %d/%d); "
-                        "retrying the same seed.",
+                        "Unstable RoboTwin seed %s for %s episode %s; "
+                        "trying the next seed in this episode's lane.",
                         seed,
                         task["name"],
-                        attempt + 1,
-                        max_attempts,
+                        task.get("episode_idx", 0),
                     )
+                    attempt += 1
                     continue
-                if _is_renderer_crash(exc) and attempt + 1 < max_attempts:
+                if _is_renderer_crash(exc) and render_retries < 2:
+                    render_retries += 1
+                    drop_renderer = True
                     logger.warning(
                         "RoboTwin renderer crashed for %s (%s); "
                         "releasing it and retrying seed %s.",
@@ -602,10 +712,6 @@ class RoboTwinBenchmark(StepBenchmark):
         else:
             assert last_error is not None
             raise last_error
-        instruction = self._instruction_for_episode(task)
-        task["instruction"] = instruction
-        self._env.set_instruction(instruction=instruction)
-        raw_obs = self._env.get_obs()
         return raw_obs
 
     def _instruction_for_episode(self, task: Task) -> str:

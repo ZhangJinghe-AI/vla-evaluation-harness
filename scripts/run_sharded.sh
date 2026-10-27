@@ -11,6 +11,7 @@ Options:
   -c <config>       Config YAML file (required)
   -n <num_shards>   Number of shards (default: 50)
   -o <output>       Output file for merged results (default: results/<config_name>.json)
+  -r <rollout_dir>  Save FP rollouts for calibration export (optional)
   -d                 Mount local harness src/ into benchmark containers
   -h                Show this help
 EOF
@@ -20,13 +21,15 @@ EOF
 CONFIG=""
 NUM_SHARDS=50
 OUTPUT=""
+ROLLOUT_DIR=""
 DEV=false
 
-while getopts "c:n:o:dh" opt; do
+while getopts "c:n:o:r:dh" opt; do
   case "$opt" in
     c) CONFIG="$OPTARG" ;;
     n) NUM_SHARDS="$OPTARG" ;;
     o) OUTPUT="$OPTARG" ;;
+    r) ROLLOUT_DIR="$OPTARG" ;;
     d) DEV=true ;;
     h) usage 0 ;;
     *) usage 1 ;;
@@ -59,6 +62,9 @@ trap cleanup EXIT
 echo "Config:     $CONFIG"
 echo "Shards:     $NUM_SHARDS"
 echo "Output:     $OUTPUT"
+if [[ -n "$ROLLOUT_DIR" ]]; then
+  echo "Rollouts:   $ROLLOUT_DIR"
+fi
 echo ""
 
 # Check for existing shard results
@@ -93,12 +99,15 @@ fi
 echo "Launching ${NUM_SHARDS} shards..."
 
 pids=()
-dev_args=()
+extra_args=()
 if [[ "$DEV" == true ]]; then
-  dev_args+=(--dev)
+  extra_args+=(--dev)
+fi
+if [[ -n "$ROLLOUT_DIR" ]]; then
+  extra_args+=(--rollout-dir "$ROLLOUT_DIR")
 fi
 for i in $(seq 0 $((NUM_SHARDS - 1))); do
-  vla-eval run -c "$CONFIG" "${dev_args[@]}" --shard-id "$i" --num-shards "$NUM_SHARDS" &
+  vla-eval run -c "$CONFIG" "${extra_args[@]}" --shard-id "$i" --num-shards "$NUM_SHARDS" &
   pids+=($!)
 done
 

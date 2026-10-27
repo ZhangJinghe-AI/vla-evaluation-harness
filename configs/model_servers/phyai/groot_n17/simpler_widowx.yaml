@@ -12,13 +12,14 @@ args:
   state_layout: "simpler_widowx"
   invert_gripper: False
   processor_model_name_or_path: "/data/share/Cosmos-Reason2-2B"
+  # qvla_pack_path: "/data/share/qvla-packs-v1/grootn17_simpler_widowx-chunksize8-seed0-reproducible_noise-W4A4_llm_dit_nvfpxnvfp-cal_rollout_v2-ns120-k1-llm_pipeline_clip-clip_mean_3std_image_mask_median_amax_005-dit_pipeline_clip-clip_mean_3std_all_output_budget_1e3_gc-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   use_differentiable_forward: False
   reproducible: True
   # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
   # Ignored when noise_mode is random. Only applied when reproducible is true.
-  inference_seed: 0
+  inference_seed: 10
   noise_mode: "episode"
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
@@ -29,4 +30,4 @@ args:
   chunk_size: 8
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8010
+  port: 8004

@@ -46,10 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--num-samples",
         type=int,
-        default=30,
+        default=None,
         help=(
-            "Output sample count; split evenly across 10 tasks and early/mid/late "
-            "phases (chunk-grid + jitter teleport)."
+            "Output sample count. Rollout export defaults to 120 and splits "
+            "task→prompt→phase, or prompt→phase when prompts cross task names. "
+            "LIBERO demo export defaults to 30."
         ),
     )
     parser.add_argument("--suite", default="libero_object")
@@ -163,7 +164,7 @@ def _export_via_docker(args: argparse.Namespace) -> None:
             "-o",
             str(output),
             "--num-samples",
-            str(args.num_samples),
+            str(30 if args.num_samples is None else args.num_samples),
             "--dataset-dir",
             str(dataset_dir),
             "--suite",
@@ -197,10 +198,11 @@ def _export_via_docker(args: argparse.Namespace) -> None:
 def _export_from_rollouts(args: argparse.Namespace) -> int:
     from vla_eval.calibration.rollout import export_rollout_calibration
 
+    num_samples = 120 if args.num_samples is None else args.num_samples
     out = export_rollout_calibration(
         args.rollout_dir,
         args.output,
-        num_samples=args.num_samples,
+        num_samples=num_samples,
         seed=args.seed,
         chunk_size=args.chunk_size,
         jitter=args.jitter,
@@ -208,7 +210,7 @@ def _export_from_rollouts(args: argparse.Namespace) -> int:
         success_only=bool(getattr(args, "success_only", False)),
         state_dim=args.state_dim,
     )
-    print(f"Exported {args.num_samples} samples to {out}")
+    print(f"Exported {num_samples} samples to {out}")
     return 0
 
 
@@ -229,12 +231,13 @@ def run_export(args: argparse.Namespace) -> int:
         jitter=args.jitter,
         end_margin=args.end_margin,
     )
+    num_samples = 30 if args.num_samples is None else args.num_samples
     out = export_libero_dataset(
         args.output,
-        num_samples=args.num_samples,
+        num_samples=num_samples,
         config=cfg,
     )
-    print(f"Exported {args.num_samples} samples to {out}")
+    print(f"Exported {num_samples} samples to {out}")
     return 0
 
 

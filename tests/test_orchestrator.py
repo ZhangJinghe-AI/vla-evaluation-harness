@@ -188,3 +188,27 @@ async def test_orchestrator_sharding_deterministic_filename(echo_server, tmp_pat
     assert expected.exists()
     saved = json.loads(expected.read_text())
     assert saved["shard"] == {"id": 0, "total": 2}
+
+
+def test_short_benchmarks_rotate_across_shards():
+    """Five-episode benchmarks must not all land on shards 0–4."""
+    from vla_eval.orchestrator import shard_owns_work_item
+
+    owners = []
+    for bench_index in range(6):
+        for index in range(5):
+            owner = next(
+                shard
+                for shard in range(30)
+                if shard_owns_work_item(index, 5, shard, 30, bench_index)
+            )
+            owners.append(owner)
+    assert owners[:5] == [0, 1, 2, 3, 4]
+    assert owners[5:10] == [5, 6, 7, 8, 9]
+    assert len(set(owners)) == 30
+
+    # A benchmark with at least as many items as shards keeps index % num_shards.
+    assert shard_owns_work_item(0, 50, 0, 30, 3)
+    assert shard_owns_work_item(1, 50, 1, 30, 3)
+    assert not shard_owns_work_item(1, 50, 0, 30, 3)
+

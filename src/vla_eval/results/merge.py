@@ -149,22 +149,27 @@ def print_merge_report(merged: dict[str, Any]) -> None:
     total_eps = info["total_episodes"]
     rate = merged.get("mean_success", 0.0)
     rate_color = "green" if rate >= 0.5 else "red"
+    avg_len = merged.get("mean_completed_subtasks")
+    avg_len_tag = f"  avg_len={avg_len:.2f}/5" if avg_len is not None else ""
 
     if missing:
         con.print(f"\n[yellow]⚠  Missing shards: {missing} (expected 0..{total_shards - 1})[/yellow]")
         con.print(f"Coverage: {total_eps} episodes (shards {len(found)}/{total_shards})")
-        con.print(f"Merged result ([yellow]PARTIAL[/yellow]): [{rate_color}]{rate:.1%}[/{rate_color}]")
+        con.print(
+            f"Merged result ([yellow]PARTIAL[/yellow]): "
+            f"[{rate_color}]{rate:.1%}[/{rate_color}]{avg_len_tag}"
+        )
         for sid in missing:
             con.print(
                 f"  To complete: [dim]vla-eval run -c <config> --shard-id {sid} --num-shards {total_shards}[/dim]"
             )
     else:
         con.print(f"\n[green]All {total_shards} shards complete.[/green] {total_eps} episodes.")
-        con.print(f"Overall: [{rate_color}]{rate:.1%}[/{rate_color}]")
+        con.print(f"Overall: [{rate_color}]{rate:.1%}[/{rate_color}]{avg_len_tag}")
 
     # Per-task summary
     con.print(f"\n{'=' * 60}")
     con.print(f"[bold]Benchmark: {merged['benchmark']}[/bold]")
     con.print(f"{'=' * 60}")
-    print_task_table(con, merged["tasks"], rate, rate_color)
+    print_task_table(con, merged["tasks"], rate, rate_color, aggregates=merged)
     con.print(f"{'=' * 60}\n")

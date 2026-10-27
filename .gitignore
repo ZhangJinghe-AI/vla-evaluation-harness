@@ -3,6 +3,8 @@
 .env
 .env.*
 /results
+/results*/
+/rollouts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

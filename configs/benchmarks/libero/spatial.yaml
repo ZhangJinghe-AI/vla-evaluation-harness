@@ -1,11 +1,11 @@
 # LIBERO Spatial suite (10 tasks × 50 episodes)
 server:
-  url: "ws://localhost:8006"
+  url: "ws://localhost:8002"
   timeout: 120.0
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
-  gpus: "0,1,3,4"
+  gpus: "2,3,5"
 
 output_dir: "./results_spatial"
 

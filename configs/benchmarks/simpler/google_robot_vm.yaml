@@ -1,8 +1,10 @@
-# SimplerEnv evaluation — Google Robot tasks (6 tasks)
-# Reference: NVIDIA Isaac-GR00T SimplerEnv README
+# SimplerEnv evaluation — Google Robot Visual Matching (4 paper tasks).
+# Pick Coke Can, Move Near, Open/Close Drawer, Place Apple.
+# Place Apple uses google_robot_place_apple_in_closed_top_drawer (official
+# paper subtask of place_in_closed_drawer). pick_object is not in that set.
 # N1.7 server: configs/model_servers/phyai/groot_n17/simpler_google.yaml
 server:
-  url: "ws://localhost:8018"
+  url: "ws://localhost:8004"
   timeout: 120.0
 
 docker:
@@ -18,36 +20,30 @@ output_dir: "./results_simpler_google_robot_vm"
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can
-    episodes_per_task: 24
+    episodes_per_task: 50
     params:
       task_name: "google_robot_pick_coke_can"
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: pick_object
-    episodes_per_task: 24
-    params:
-      task_name: "google_robot_pick_object"
-
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near
-    episodes_per_task: 24
+    episodes_per_task: 50
     params:
       task_name: "google_robot_move_near"
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: open_drawer
-    episodes_per_task: 24
+    episodes_per_task: 50
     params:
       task_name: "google_robot_open_drawer"
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: close_drawer
-    episodes_per_task: 24
+    episodes_per_task: 50
     params:
       task_name: "google_robot_close_drawer"
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: place_in_closed_drawer
-    episodes_per_task: 24
+    subname: place_apple_in_closed_top_drawer
+    episodes_per_task: 50
     params:
-      task_name: "google_robot_place_in_closed_drawer"
+      task_name: "google_robot_place_apple_in_closed_top_drawer"

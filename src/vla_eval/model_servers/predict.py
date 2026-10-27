@@ -93,6 +93,11 @@ class PredictModelServer(ModelServer):
         If ``predict()`` returns a 1-D array ``(action_dim,)``, chunking is
         bypassed regardless of ``chunk_size``.
 
+        If the language instruction changes mid-episode (e.g. SimplerEnv
+        place-in-drawer: ``open drawer`` → ``place apple into drawer``),
+        the open-loop chunk is discarded and ``predict()`` runs again so
+        the new prompt is not ignored for up to ``chunk_size - 1`` steps.
+
     Action ensemble (for overlapping chunks):
         - ``"newest"`` (default): use the latest chunk's action.
         - ``"average"``: element-wise mean of old and new.
@@ -152,6 +157,8 @@ class PredictModelServer(ModelServer):
 
         self._chunk_buffers: dict[str, ActionChunkBuffer] = {}
         self._session_chunk_sizes: dict[str, int] = {}
+        # Last language prompt per session (for mid-episode instruction flush).
+        self._last_prompts: dict[str, str] = {}
         # Serialise predict() calls so only one runs on the GPU at a time.
         # The batched path (_dispatch_loop) is already single-threaded; this
         # lock protects the non-batched and CI paths.
@@ -168,6 +175,39 @@ class PredictModelServer(ModelServer):
         self._ci_tasks: dict[str, asyncio.Task[None]] = {}
         self._obs_slots: dict[str, tuple[Observation, SessionContext, float]] = {}
         self._obs_events: dict[str, asyncio.Event] = {}
+
+    @staticmethod
+    def _prompt_from_obs(obs: Observation) -> str:
+        """Language string used to detect mid-episode instruction changes."""
+        for key in ("task_description", "language", "prompt", "instruction"):
+            value = obs.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    def _flush_chunk_if_prompt_changed(self, obs: Observation, ctx: SessionContext) -> None:
+        """Drop open-loop actions when the instruction changes mid-episode."""
+        sid = ctx.session_id
+        prompt = self._prompt_from_obs(obs)
+        previous = self._last_prompts.get(sid)
+        self._last_prompts[sid] = prompt
+        if previous is None or previous == prompt:
+            return
+        buf = self._chunk_buffers.get(sid)
+        if buf is None or buf.empty:
+            return
+        buf.clear()
+        logger.info(
+            "Language changed mid-episode; flushed action chunk session=%s "
+            "step=%d (%r -> %r)",
+            sid[:8],
+            ctx.step,
+            previous[:80],
+            prompt[:80],
+        )
 
     # ------------------------------------------------------------------
     # Inference methods — override one or both
@@ -278,6 +318,10 @@ class PredictModelServer(ModelServer):
             self._obs_slots[sid] = (obs, ctx, time.monotonic())
             event.set()
             return
+
+        # Multi-stage tasks rewrite the prompt mid-episode. Do not keep
+        # open-loop actions that were planned under the previous instruction.
+        self._flush_chunk_if_prompt_changed(obs, ctx)
 
         # Serve from chunk buffer if available (skip inference)
         buffered = self._try_serve_from_buffer(ctx)
@@ -503,6 +547,7 @@ class PredictModelServer(ModelServer):
         """
         sid = ctx.session_id
         self._chunk_buffers.pop(sid, None)
+        self._last_prompts.pop(sid, None)
 
         if self.continuous_inference:
             await self._stop_ci(sid)
@@ -516,6 +561,7 @@ class PredictModelServer(ModelServer):
         sid = ctx.session_id
         self._chunk_buffers.pop(sid, None)
         self._session_chunk_sizes.pop(sid, None)
+        self._last_prompts.pop(sid, None)
 
         if self.continuous_inference:
             await self._stop_ci(sid)

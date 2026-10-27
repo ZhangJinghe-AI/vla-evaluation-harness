@@ -99,9 +99,31 @@ def _aggregate_metrics(result: Any, episodes: Any, metric_keys: dict[str, str]) 
             result[f"{agg_type}_{key}"] = round(fn(values), 4)
 
 
-def print_task_table(console: Any, tasks: list, rate: float, rate_color: str) -> None:
-    """Print per-task summary table with error annotations. Shared by collector and merge."""
+# Switch to compact summary when there are many tasks (e.g. RoboTwin 50).
+_COMPACT_TASK_THRESHOLD = 12
+
+
+def print_task_table(
+    console: Any,
+    tasks: list,
+    rate: float,
+    rate_color: str,
+    aggregates: dict[str, Any] | None = None,
+) -> None:
+    """Print per-task summary table with error annotations. Shared by collector and merge.
+
+    When ``mean_completed_subtasks`` is present (CALVIN), also print the
+    official 0–5 average chain length next to success rate.
+
+    With many tasks (``>= _COMPACT_TASK_THRESHOLD``), print a compact
+    overview (totals, distribution, best/worst) instead of a 50-line table.
+    """
+    if len(tasks) >= _COMPACT_TASK_THRESHOLD:
+        _print_compact_task_summary(console, tasks, rate, rate_color, aggregates)
+        return
+
     total_errors = 0
+    show_completed = any("mean_completed_subtasks" in task for task in tasks)
     for task in tasks:
         n = task["num_episodes"]
         errs = task.get("num_errors", 0)
@@ -110,11 +132,81 @@ def print_task_table(console: Any, tasks: list, rate: float, rate_color: str) ->
         tr = task.get("mean_success", 0.0)
         tc = "green" if tr >= 0.5 else "red"
         err_tag = f" [yellow]⚠ {errs} errors[/yellow]" if errs else ""
-        console.print(f"  {task['task']:40s} [{tc}]{tr:6.1%}[/{tc}] ({successes}/{n}){err_tag}")
+        completed_tag = ""
+        if show_completed and "mean_completed_subtasks" in task:
+            completed_tag = f"  avg_len={task['mean_completed_subtasks']:.2f}/5"
+        console.print(
+            f"  {task['task']:40s} [{tc}]{tr:6.1%}[/{tc}] ({successes}/{n}){completed_tag}{err_tag}"
+        )
     console.print(f"{'─' * 60}")
-    console.print(f"  {'Overall':40s} [{rate_color}]{rate:6.1%}[/{rate_color}]")
+    overall_extra = ""
+    agg = aggregates or {}
+    if "mean_completed_subtasks" in agg:
+        overall_extra = f"  avg_len={agg['mean_completed_subtasks']:.2f}/5"
+    console.print(f"  {'Overall':40s} [{rate_color}]{rate:6.1%}[/{rate_color}]{overall_extra}")
     if total_errors:
         console.print(f"  [yellow]⚠ {total_errors} episodes had errors — success rate may be understated[/yellow]")
+
+
+def _print_compact_task_summary(
+    console: Any,
+    tasks: list,
+    rate: float,
+    rate_color: str,
+    aggregates: dict[str, Any] | None,
+) -> None:
+    """Compact multi-task summary: totals, histogram, best/worst tasks."""
+    rows: list[tuple[str, float, int, int, int]] = []
+    total_errors = 0
+    total_eps = 0
+    total_succ = 0
+    for task in tasks:
+        n = int(task["num_episodes"])
+        errs = int(task.get("num_errors", 0))
+        tr = float(task.get("mean_success", 0.0))
+        succ = int(round(tr * n))
+        rows.append((str(task["task"]), tr, succ, n, errs))
+        total_errors += errs
+        total_eps += n
+        total_succ += succ
+
+    eps_per = sorted({n for _, _, _, n, _ in rows})
+    eps_tag = f"{eps_per[0]}/task" if len(eps_per) == 1 else f"{min(eps_per)}-{max(eps_per)}/task"
+
+    console.print(f"  Tasks: {len(rows)}    Episodes: {total_succ}/{total_eps} ({eps_tag})")
+    if total_errors:
+        console.print(f"  [yellow]Errors: {total_errors} (counted as failures)[/yellow]")
+    console.print(f"  Overall: [{rate_color}]{rate:6.1%}[/{rate_color}]  ({total_succ}/{total_eps})")
+
+    agg = aggregates or {}
+    if "mean_completed_subtasks" in agg:
+        console.print(f"  avg_len={agg['mean_completed_subtasks']:.2f}/5")
+
+    # Per-task success-rate buckets
+    buckets = [
+        (0.8, 1.01, "80-100%"),
+        (0.6, 0.8, "60-80%"),
+        (0.4, 0.6, "40-60%"),
+        (0.2, 0.4, "20-40%"),
+        (0.0, 0.2, "0-20%"),
+    ]
+    console.print("  Score distribution (by task):")
+    for lo, hi, label in buckets:
+        count = sum(1 for _, tr, _, _, _ in rows if lo <= tr < hi)
+        bar = "█" * count
+        console.print(f"    {label:8s} {count:3d}  {bar}")
+
+    ranked = sorted(rows, key=lambda r: (-r[1], r[0]))
+    console.print("  Best:")
+    for name, tr, succ, n, _errs in ranked[:5]:
+        tc = "green" if tr >= 0.5 else "red"
+        console.print(f"    {name:28s} [{tc}]{tr:6.1%}[/{tc}] ({succ}/{n})")
+    console.print("  Worst:")
+    for name, tr, succ, n, _errs in ranked[-5:]:
+        tc = "green" if tr >= 0.5 else "red"
+        console.print(f"    {name:28s} [{tc}]{tr:6.1%}[/{tc}] ({succ}/{n})")
+    console.print(f"{'─' * 60}")
+    console.print("  [dim]Full per-task rates are in the merged JSON.[/dim]")
 
 
 class ResultCollector:
@@ -195,7 +287,7 @@ class ResultCollector:
         console.print(f"\n{'=' * 60}")
         console.print(f"[bold]Benchmark: {result['benchmark']}[/bold] (mode: {result['mode']})")
         console.print(f"{'=' * 60}")
-        print_task_table(console, result["tasks"], rate, rate_color)
+        print_task_table(console, result["tasks"], rate, rate_color, aggregates=result)
         console.print(f"{'=' * 60}\n")
 
     def to_json(self, config: dict[str, Any] | None = None) -> str:

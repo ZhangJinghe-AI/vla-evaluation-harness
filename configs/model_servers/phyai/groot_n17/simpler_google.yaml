@@ -1,7 +1,7 @@
-# PhyAI GR00T-N1.7 — SimplerEnv Google Robot (Fractal), full precision.
+# PhyAI GR00T-N1.7 — SimplerEnv Google Robot (Fractal).
 # Runtime flags match configs/model_servers/phyai/groot_n17/libero.yaml.
 # Capture task texts are hard-coded in groot-n17-phyai.py under model_suite.
-# No QVLA pack: this server stays on the raw checkpoint.
+# qvla_pack_path loads the W4A4 pack; omit it to stay on the raw checkpoint.
 script: "./src/vla_eval/model_servers/groot-n17-phyai.py"
 args:
   model_kind: "groot_n17"
@@ -12,21 +12,24 @@ args:
   state_layout: "simpler_google"
   invert_gripper: False
   processor_model_name_or_path: "/data/share/Cosmos-Reason2-2B"
+  qvla_pack_path: "/data/share/qvla-packs-v1/grootn17_simpler_google_robot-chunksize8-seed0-reproducible_noise-W4A4_llm_dit_nvfpxnvfp-cal_rollout_v2-ns120-k1-llm_pipeline_none-dit_pipeline_none-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   use_differentiable_forward: False
   reproducible: True
   # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
   # Ignored when noise_mode is random. Only applied when reproducible is true.
-  inference_seed: 0
+  inference_seed: 30
   noise_mode: "episode"
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot
   # for the length-dummy pad, so business max_batch_size becomes this - 1.
   max_batch_size: 8
   strict_pack_match: True
-  # Full embodiment action horizon (simpler_env_google delta_indices).
+  # Open-loop chunk (= embodiment action horizon). Official Fractal client
+  # often uses n-action-steps=1; we keep 8. PredictModelServer flushes the
+  # buffer if task_description changes mid-episode (place_in_drawer).
   chunk_size: 8
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8018
+  port: 8004

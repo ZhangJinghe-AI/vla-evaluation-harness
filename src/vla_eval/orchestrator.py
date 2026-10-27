@@ -30,6 +30,26 @@ logger = logging.getLogger(__name__)
 _SAFE_NAME_RE = re.compile(r"[^\w\-.]")
 
 
+def shard_owns_work_item(
+    index: int,
+    n_items: int,
+    shard_id: int,
+    num_shards: int,
+    bench_index: int,
+) -> bool:
+    """Return whether this shard runs work item ``index``.
+
+    Benchmarks with at least ``num_shards`` items keep the original
+    ``index % num_shards`` assignment. Shorter benchmarks rotate by
+    ``bench_index`` so successive 5-episode tasks land on different shards.
+    """
+    if n_items <= 0 or num_shards <= 0:
+        return False
+    if n_items >= num_shards:
+        return index % num_shards == shard_id
+    return (index + bench_index * n_items) % num_shards == shard_id
+
+
 class Orchestrator:
     """Coordinates evaluation: creates benchmarks, runners, connections, and runs episodes.
 
@@ -41,7 +61,8 @@ class Orchestrator:
            An explicit config value always takes precedence.
         4. Build a flat list of (task, episode) work items.
         5. If sharding is enabled, select this shard's subset via round-robin
-           (``item_index % num_shards == shard_id``).
+           (``item_index % num_shards == shard_id``). A benchmark shorter than
+           the shard count is rotated by its position in the config.
         6. Run each work item, recording results.  Failures are isolated per
            episode — one crash does not abort the entire benchmark.
 
@@ -87,8 +108,8 @@ class Orchestrator:
         benchmark_configs = self.config.get("benchmarks", [])
         all_results = []
 
-        for bench_cfg in benchmark_configs:
-            result = await self._run_benchmark(bench_cfg)
+        for bench_index, bench_cfg in enumerate(benchmark_configs):
+            result = await self._run_benchmark(bench_cfg, bench_index)
             all_results.append(result)
 
         return all_results
@@ -107,7 +128,7 @@ class Orchestrator:
         tmp.write_text(json.dumps({"completed": completed, "total": total, "errors": errors}))
         tmp.replace(self._progress_path)  # atomic on POSIX
 
-    async def _run_benchmark(self, bench_cfg: dict[str, Any]) -> dict[str, Any]:
+    async def _run_benchmark(self, bench_cfg: dict[str, Any], bench_index: int = 0) -> dict[str, Any]:
         """Run a single benchmark evaluation."""
         cfg = EvalConfig.from_dict(bench_cfg)
         name = cfg.resolved_name()
@@ -131,11 +152,17 @@ class Orchestrator:
                 raise FileExistsError(f"Another eval is already writing to {output_path}")
 
         try:
-            return await self._run_benchmark_inner(cfg, name, safe_name)
+            return await self._run_benchmark_inner(cfg, name, safe_name, bench_index)
         finally:
             self._release_file_lock()
 
-    async def _run_benchmark_inner(self, cfg: EvalConfig, name: str, safe_name: str) -> dict[str, Any]:
+    async def _run_benchmark_inner(
+        self,
+        cfg: EvalConfig,
+        name: str,
+        safe_name: str,
+        bench_index: int = 0,
+    ) -> dict[str, Any]:
         """Run benchmark episodes, collect results, and save."""
         # Set up progress file for live monitoring
         self._progress_path = self._output_dir / f"{self._shard_stem(safe_name)}.progress"
@@ -224,7 +251,7 @@ class Orchestrator:
             else:
                 from vla_eval.calibration.rollout import RolloutRecorder
 
-                rollout_recorder = RolloutRecorder(rollout_dir)
+                rollout_recorder = RolloutRecorder(rollout_dir, shard_id=self.shard_id)
                 logger.info("Saving FP rollouts to %s", rollout_recorder.output_dir)
 
         # Get tasks
@@ -237,9 +264,15 @@ class Orchestrator:
         # Build flat work-item list and apply sharding
         work_items = [(task, ep) for task in tasks for ep in range(cfg.episodes_per_task)]
         if self.num_shards is not None and self.shard_id is not None:
-            # Sharding: round-robin by work-item index, not by task.
-            # E.g. 2 tasks × 3 episodes = 6 items → shard 0 gets items 0,2,4.
-            work_items = [w for i, w in enumerate(work_items) if i % self.num_shards == self.shard_id]
+            # Round-robin by work-item index. A benchmark shorter than the
+            # shard count is rotated by its position in the config, so a run
+            # of 5-episode tasks is not piled onto shards 0–4.
+            n_items = len(work_items)
+            work_items = [
+                w
+                for i, w in enumerate(work_items)
+                if shard_owns_work_item(i, n_items, self.shard_id, self.num_shards, bench_index)
+            ]
             logger.info(
                 "Shard %d/%d: %d episodes assigned",
                 self.shard_id,
@@ -268,10 +301,18 @@ class Orchestrator:
             for item_idx, (task, ep) in enumerate(work_items):
                 task_name = task.get("name", str(task))
                 try:
-                    episode_idx = ep
-                    max_ep = metadata.get("max_episodes_per_task")
-                    if cfg.throughput_mode and max_ep is not None:
-                        episode_idx = ep % max_ep
+                    # Outer-loop ``ep`` selects the init (LIBERO initial_states,
+                    # RoboTwin seed_base + episode_idx). Expert-check RoboTwin
+                    # still pre-expands tasks and must keep that id when
+                    # episodes_per_task==1, or merge collapses every episode to 0.
+                    preassigned = task.get("episode_idx")
+                    if preassigned is not None and cfg.episodes_per_task == 1:
+                        episode_idx = int(preassigned)
+                    else:
+                        episode_idx = ep
+                        max_ep = metadata.get("max_episodes_per_task")
+                        if cfg.throughput_mode and max_ep is not None:
+                            episode_idx = ep % max_ep
                     task = {**task, "episode_idx": episode_idx}
                     run_kwargs: dict[str, Any] = {}
                     if rollout_recorder is not None:
@@ -279,16 +320,17 @@ class Orchestrator:
                     raw = await runner.run_episode(
                         benchmark, task, conn, max_steps=max_steps, **run_kwargs
                     )
-                    raw["episode_id"] = ep
+                    raw["episode_id"] = episode_idx
                     ep_result = cast(EpisodeResult, raw)
                     collector.record(task_name, ep_result)
-                    status = "SUCCESS" if ep_result.get("metrics", {}).get("success") else "FAIL"
+                    succeeded = bool(ep_result.get("metrics", {}).get("success"))
+                    status = "SUCCESS" if succeeded else "FAIL"
                     logger.info(
                         "  [%d/%d] %s ep%d: %s (steps=%d)",
                         item_idx + 1,
                         total_items,
                         task_name,
-                        ep,
+                        episode_idx,
                         status,
                         ep_result.get("steps", 0),
                     )
@@ -351,6 +393,8 @@ class Orchestrator:
                     )
                     record_failure("exception", traceback.format_exc())
         finally:
+            if rollout_recorder is not None:
+                rollout_recorder.finish()
             benchmark.cleanup()
             await conn.close()
 
