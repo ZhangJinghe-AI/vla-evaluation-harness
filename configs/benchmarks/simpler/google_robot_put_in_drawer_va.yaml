@@ -33,7 +33,7 @@ _shared_build_kwargs: &build_kwargs
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_base
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -43,7 +43,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_bg_bedroom
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -53,7 +53,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_bg_office
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -63,7 +63,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_light_bright
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -79,7 +79,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_light_dark
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -95,7 +95,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_cabinet_2
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"
@@ -111,7 +111,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: put_in_drawer_va_cabinet_3
-    episodes_per_task: 27
+    episodes_per_task: 10
     params:
       task_name: "google_robot_place_apple_in_closed_top_drawer"
       env_name: "PlaceIntoClosedTopDrawerCustomInScene-v0"

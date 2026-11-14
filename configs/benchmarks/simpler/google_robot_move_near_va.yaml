@@ -29,7 +29,7 @@ _shared_build_kwargs: &build_kwargs
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_base
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -39,7 +39,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_no_distractor
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -53,7 +53,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_bg_1
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -63,7 +63,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_bg_2
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -73,7 +73,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_light_dark
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -87,7 +87,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_light_bright
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -101,7 +101,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_table_tex_1
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -111,7 +111,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_table_tex_2
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearGoogleInScene-v0"
@@ -121,7 +121,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_camera_1
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearAltGoogleCameraInScene-v0"
@@ -131,7 +131,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: move_near_va_camera_2
-    episodes_per_task: 60
+    episodes_per_task: 20
     params:
       task_name: "google_robot_move_near"
       env_name: "MoveNearAltGoogleCamera2InScene-v0"

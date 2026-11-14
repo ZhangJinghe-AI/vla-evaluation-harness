@@ -1,9 +1,9 @@
 # RoboCasa Panda atomic eval for pi0.5.
 # This harness image registers classic short names (24 atomic tasks), not the
 # RoboCasa365 long-name target50 set (PickPlaceCounterToCabinet, …).
-# 50 episodes/task (full Panda atomic convention).
+# 20 episodes/task (faster iteration; full Panda atomic convention is 50).
 server:
-  url: "ws://localhost:8004"
+  url: "ws://localhost:8002"
   timeout: 120.0
 
 docker:
@@ -14,7 +14,7 @@ output_dir: "./results_robocasa_pi05"
 
 benchmarks:
   - benchmark: "vla_eval.benchmarks.robocasa.benchmark:RoboCasaBenchmark"
-    episodes_per_task: 50
+    episodes_per_task: 20
     params:
       robot: PandaOmron
       camera_size: 256

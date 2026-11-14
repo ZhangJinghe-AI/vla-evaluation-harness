@@ -9,7 +9,7 @@ server:
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/robotwin:latest
-  gpus: "0,1,4"
+  gpus: "0,4"
 
 output_dir: "./results_robotwin_pi05"
 

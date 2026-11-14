@@ -1,11 +1,11 @@
-# PhyAI pi0.5 — RoboTwin 2.0 OpenPI checkpoint, full precision.
+# PhyAI pi0.5 — RoboTwin 2.0 OpenPI checkpoint.
 # Joint deltas are converted back to 14-D absolute qpos before the env steps.
 # Runtime flags match configs/model_servers/phyai/pi05/libero.yaml.
-# No QVLA pack: this server stays on the raw checkpoint.
 script: "./src/vla_eval/model_servers/pi05-phyai.py"
 args:
   model_kind: "pi05"
   checkpoint_path: "/data/share/pi0.5_robotwin2"
+  qvla_pack_path: "/data/share/qvla-packs-v1/pi05_robotwin-chunksize32-seed0-reproducible_noise-W4A4_llm_dit_nvfpxnvfp-cal_rollout_v2-ns128-k1-llm_pipeline_clip-clip_mean_3std_image_mask_median_amax_005-dit_pipeline_clip-clip_mean_3std_all_output_budget_1e3_gc_b4-test1.pt"
   embodiment: "robotwin"
   openpi_norm_stats: "/data/share/pi0.5_robotwin2/assets/pi0.5_clean_randomize_joint_training/norm_stats.json"
   openpi_chunk_size: 32
@@ -24,7 +24,7 @@ args:
   reproducible: True
   # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
   # Ignored when noise_mode is random. Only applied when reproducible is true.
-  inference_seed: 10
+  inference_seed: 0
   noise_mode: "episode"
   use_cuda_graph: True
   # Engine batch size (prefer power of 2). reproducible=True reserves 1 slot

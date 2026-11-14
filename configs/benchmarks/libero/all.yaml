@@ -6,7 +6,7 @@ server:
 
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
-  gpus: "2,3,6"
+  gpus: "0,1,4"
 
 output_dir: "./results_libero_all"
 

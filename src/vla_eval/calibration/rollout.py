@@ -14,7 +14,7 @@ import re
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -128,24 +128,35 @@ class RolloutRecorder:
         descriptions = np.asarray([frame["task_description"] for frame in frames], dtype=object)
 
         task_name = str(task.get("name") or descriptions[0] or "task")
+        # BenchmarkConfig.subname disambiguates variants that share task_name
+        # (SimplerEnv Google VA: many subnames → one google_robot_move_near).
+        subname = str(task.get("subname") or "").strip()
         episode_idx = int(task.get("episode_idx", 0))
         status = "success" if success else "fail"
         shard = f"_shard{self.shard_id}" if self.shard_id is not None else ""
-        stem = f"{_safe_name(task_name)}_ep{episode_idx:04d}{shard}_{status}"
+        if subname:
+            stem = (
+                f"{_safe_name(task_name)}__{_safe_name(subname)}"
+                f"_ep{episode_idx:04d}{shard}_{status}"
+            )
+        else:
+            stem = f"{_safe_name(task_name)}_ep{episode_idx:04d}{shard}_{status}"
         final_path = self.output_dir / f"{stem}.npz"
         if final_path.exists():
             raise FileExistsError(f"Rollout already exists: {final_path}")
 
         tmp_path = self.output_dir / f".rollout-{uuid.uuid4().hex[:12]}.npz"
-        np.savez_compressed(
-            tmp_path,
-            camera_keys=np.asarray(keys, dtype=object),
-            images=images,
-            states=states,
-            task_descriptions=descriptions,
-            task_name=np.asarray(task_name),
-            success=np.asarray(success),
-        )
+        save_kwargs: dict[str, Any] = {
+            "camera_keys": np.asarray(keys, dtype=object),
+            "images": images,
+            "states": states,
+            "task_descriptions": descriptions,
+            "task_name": np.asarray(task_name),
+            "success": np.asarray(success),
+        }
+        if subname:
+            save_kwargs["subname"] = np.asarray(subname)
+        np.savez_compressed(tmp_path, **save_kwargs)
         tmp_path.replace(final_path)
         meta = {
             "file": final_path.name,
@@ -153,9 +164,27 @@ class RolloutRecorder:
             "length": int(images.shape[0]),
             "success": bool(success),
         }
+        if subname:
+            meta["subname"] = subname
         final_path.with_suffix(".meta.json").write_text(json.dumps(meta), encoding="utf-8")
         logger.info("Saved rollout: %s (%d frames)", final_path.name, images.shape[0])
         return final_path
+
+
+def rollout_unit_key(episode: dict[str, Any]) -> str:
+    """Stable quota key for one saved rollout episode.
+
+    Prefer ``task_name::subname`` when ``subname`` was recorded so Google VA
+    variants that share an env ``task_name`` stay separate. Fall back to
+    ``task_name`` for older rollouts that only stored that field.
+    """
+    task_name = str(episode.get("task_name") or "")
+    if not task_name:
+        raise ValueError(f"Rollout meta is missing task_name: {episode.get('npz_path')}")
+    subname = str(episode.get("subname") or "").strip()
+    if subname:
+        return f"{task_name}::{subname}"
+    return task_name
 
 
 def _load_meta(path: Path) -> dict[str, Any]:
@@ -273,20 +302,26 @@ def export_rollout_calibration(
     end_margin: int = 10,
     success_only: bool = False,
     state_dim: int = 8,
+    group: Literal["auto", "task", "prompt"] = "auto",
 ) -> Path:
     """Sample saved rollouts into a version-2 calibration ``.npz``.
 
-    One directory is one calibration set. When prompts stay inside a single
-    ``task_name``, the budget is split task → prompt → phase. When the same
-    prompt is reused across task names, task names are ignored and the budget
-    is split prompt → phase.     Extra units are dropped by a seeded shuffle. A phase shortfall is filled
-    from unused candidate frames, preferring the same phase on another unit.
+    One directory is one calibration set. Quota units are
+    ``task_name::subname`` when rollouts recorded a YAML ``subname`` (so
+    SimplerEnv Google VA variants stay separate); otherwise ``task_name``.
+    When ``group="auto"`` (default), prompts private to a unit use
+    unit → prompt → phase; prompts shared across units use prompt → phase.
+    Pass ``group="task"`` or ``group="prompt"`` to force either split. Extra
+    units are dropped by a seeded shuffle. A phase shortfall is filled from
+    unused candidate frames, preferring the same phase on another unit.
     Frames are never repeated. Export raises only when those candidates still
     cannot reach ``num_samples``. The same seed always selects the same frames.
     Early/mid/late is measured inside each contiguous prompt span.
     """
     if num_samples <= 0:
         raise ValueError("num_samples must be positive.")
+    if group not in ("auto", "task", "prompt"):
+        raise ValueError(f"group must be auto/task/prompt, got {group!r}.")
     root = Path(rollout_dir).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Rollout directory does not exist: {root}")
@@ -312,13 +347,11 @@ def export_rollout_calibration(
     jitter_rng = random.Random(seed)
     alloc_rng = random.Random(seed)
     for episode in episodes:
-        task_name = str(episode.get("task_name") or "")
-        if not task_name:
-            raise ValueError(f"Rollout meta is missing task_name: {episode['npz_path'].name}")
+        unit = rollout_unit_key(episode)
         descriptions = _episode_descriptions(episode["npz_path"])
         for prompt, start, end in _prompt_segments(descriptions):
-            task_prompts.setdefault(task_name, set()).add(prompt)
-            phase_pools = pools.setdefault(task_name, {}).setdefault(prompt, [{}, {}, {}])
+            task_prompts.setdefault(unit, set()).add(prompt)
+            phase_pools = pools.setdefault(unit, {}).setdefault(prompt, [{}, {}, {}])
             for local_index, phase in candidate_indices_for_trajectory(
                 end - start,
                 chunk_size=chunk_size,
@@ -328,7 +361,8 @@ def export_rollout_calibration(
             ):
                 phase_pools[int(phase)][(episode["npz_path"], start + local_index)] = None
 
-    group = calibration_group(task_prompts)
+    if group == "auto":
+        group = calibration_group(task_prompts)
     prompt_names = {prompt for prompts in task_prompts.values() for prompt in prompts}
     if group == "prompt":
         quotas = assign_shuffled_quotas(num_samples, sorted(prompt_names), alloc_rng)
@@ -341,15 +375,15 @@ def export_rollout_calibration(
     else:
         task_quotas = assign_shuffled_quotas(num_samples, sorted(task_prompts), alloc_rng)
         selections = []
-        for task_name, task_quota in task_quotas.items():
+        for unit, task_quota in task_quotas.items():
             if task_quota == 0:
                 continue
             prompt_quotas = assign_shuffled_quotas(
-                task_quota, sorted(task_prompts[task_name]), alloc_rng
+                task_quota, sorted(task_prompts[unit]), alloc_rng
             )
             for prompt, quota in prompt_quotas.items():
                 if quota > 0:
-                    selections.append((prompt, quota, [task_name]))
+                    selections.append((prompt, quota, [unit]))
 
     if group == "prompt":
         units = [
@@ -365,9 +399,9 @@ def export_rollout_calibration(
         ]
     else:
         units = [
-            (f"{task_name}\0{prompt}", _frames_for_prompt(pools, prompt, [task_name]))
-            for task_name in sorted(task_prompts)
-            for prompt in sorted(task_prompts[task_name])
+            (f"{unit}\0{prompt}", _frames_for_prompt(pools, prompt, [unit]))
+            for unit in sorted(task_prompts)
+            for prompt in sorted(task_prompts[unit])
         ]
     picks: list[tuple[Path, int]] = []
     used: set[tuple[Path, int]] = set()
@@ -421,4 +455,5 @@ def export_rollout_calibration(
 __all__ = [
     "RolloutRecorder",
     "export_rollout_calibration",
+    "rollout_unit_key",
 ]

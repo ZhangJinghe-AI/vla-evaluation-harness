@@ -30,7 +30,7 @@ _shared_build_kwargs: &build_kwargs
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_base
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -40,7 +40,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_table_tex_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -50,7 +50,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_table_tex_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -60,7 +60,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_distractor_default
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -70,7 +70,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_distractor_more
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -85,7 +85,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_bg_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -95,7 +95,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_bg_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -105,7 +105,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_light_dark
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -120,7 +120,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_light_bright
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -135,7 +135,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_camera_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0"
@@ -145,7 +145,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_horizontal_camera_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_horizontal_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0"
@@ -155,7 +155,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_base
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -169,7 +169,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_table_tex_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -183,7 +183,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_table_tex_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -197,7 +197,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_distractor_default
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -211,7 +211,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_distractor_more
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -226,7 +226,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_bg_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -240,7 +240,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_bg_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -254,7 +254,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_light_dark
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -269,7 +269,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_light_bright
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -284,7 +284,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_camera_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0"
@@ -298,7 +298,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_vertical_camera_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_vertical_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0"
@@ -312,7 +312,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_base
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -326,7 +326,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_table_tex_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -340,7 +340,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_table_tex_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -354,7 +354,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_distractor_default
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -368,7 +368,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_distractor_more
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanDistractorInScene-v0"
@@ -383,7 +383,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_bg_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -397,7 +397,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_bg_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -411,7 +411,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_light_dark
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -426,7 +426,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_light_bright
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanInScene-v0"
@@ -441,7 +441,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_camera_1
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0"
@@ -455,7 +455,7 @@ benchmarks:
 
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: pick_coke_can_va_standing_camera_2
-    episodes_per_task: 25
+    episodes_per_task: 10
     params:
       task_name: "google_robot_pick_standing_coke_can"
       env_name: "GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0"

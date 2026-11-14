@@ -2,15 +2,17 @@
 # Paper 4-task set on both sides: Pick Coke Can, Move Near, Open/Close Drawer,
 # Place Apple. VM Place Apple is google_robot_place_apple_in_closed_top_drawer.
 # pick_object is omitted. VA Place Apple is put_in_drawer_va_* (already apple).
-# VM: 50 eps/task. VA: full init grid per variant (pick 25, move_near 60,
-# drawer 9, put_in 27) so pose coverage matches official VA — fair vs VM
-# when both are reported as 4-task macro averages (not episode-weighted).
+# Self-comparison budget (not matched to official VA grids):
+# VM: 100 eps/task (was 24; reduces seed noise), except move_near=60
+# (only 60 init triplets). VA unchanged:
+# pick 10, move_near 20, drawer 5, put_in 10 per variant.
+# Still report 4-task macro averages (not episode-weighted).
 server:
   url: ws://localhost:8004
   timeout: 120.0
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
-  gpus: 0,1,4
+  gpus: "0,1,4"
   env:
   - NVIDIA_DRIVER_CAPABILITIES=all
   volumes:
@@ -19,32 +21,34 @@ output_dir: ./results_simpler_google_robot_all
 benchmarks:
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can
-  episodes_per_task: 50
+  episodes_per_task: 100
   params:
     task_name: google_robot_pick_coke_can
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near
-  episodes_per_task: 50
+  # Cap at 60: MoveNearInScene only has 60 object-init triplets; higher
+  # episode_id raises IndexError and is counted as harness failure.
+  episodes_per_task: 60
   params:
     task_name: google_robot_move_near
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: open_drawer
-  episodes_per_task: 50
+  episodes_per_task: 100
   params:
     task_name: google_robot_open_drawer
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: close_drawer
-  episodes_per_task: 50
+  episodes_per_task: 100
   params:
     task_name: google_robot_close_drawer
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: place_apple_in_closed_top_drawer
-  episodes_per_task: 50
+  episodes_per_task: 100
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_base
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -73,7 +77,7 @@ benchmarks:
       - 5
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_table_tex_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -82,7 +86,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_table_tex_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -91,7 +95,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_distractor_default
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -100,7 +104,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_distractor_more
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -114,7 +118,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_bg_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -123,7 +127,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_bg_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -132,7 +136,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_light_dark
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -146,7 +150,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_light_bright
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -160,7 +164,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_camera_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0
@@ -169,7 +173,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_horizontal_camera_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_horizontal_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0
@@ -178,7 +182,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_base
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -191,7 +195,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_table_tex_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -204,7 +208,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_table_tex_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -217,7 +221,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_distractor_default
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -230,7 +234,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_distractor_more
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -244,7 +248,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_bg_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -257,7 +261,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_bg_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -270,7 +274,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_light_dark
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -284,7 +288,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_light_bright
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -298,7 +302,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_camera_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0
@@ -311,7 +315,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_vertical_camera_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_vertical_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0
@@ -324,7 +328,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_base
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -337,7 +341,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_table_tex_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -350,7 +354,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_table_tex_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -363,7 +367,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_distractor_default
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -376,7 +380,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_distractor_more
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanDistractorInScene-v0
@@ -390,7 +394,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_bg_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -403,7 +407,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_bg_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -416,7 +420,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_light_dark
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -430,7 +434,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_light_bright
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanInScene-v0
@@ -444,7 +448,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_camera_1
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0
@@ -457,7 +461,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: pick_coke_can_va_standing_camera_2
-  episodes_per_task: 25
+  episodes_per_task: 10
   params:
     task_name: google_robot_pick_standing_coke_can
     env_name: GraspSingleOpenedCokeCanAltGoogleCamera2InScene-v0
@@ -470,7 +474,7 @@ benchmarks:
     init_config: *id002
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_base
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -498,7 +502,7 @@ benchmarks:
       - 60
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_no_distractor
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -511,7 +515,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_bg_1
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -520,7 +524,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_bg_2
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -529,7 +533,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_light_dark
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -542,7 +546,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_light_bright
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -555,7 +559,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_table_tex_1
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -564,7 +568,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_table_tex_2
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearGoogleInScene-v0
@@ -573,7 +577,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_camera_1
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearAltGoogleCameraInScene-v0
@@ -582,7 +586,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: move_near_va_camera_2
-  episodes_per_task: 60
+  episodes_per_task: 20
   params:
     task_name: google_robot_move_near
     env_name: MoveNearAltGoogleCamera2InScene-v0
@@ -591,7 +595,7 @@ benchmarks:
     init_config: *id003
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -620,7 +624,7 @@ benchmarks:
       - 1
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -629,7 +633,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -638,7 +642,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -652,7 +656,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -666,7 +670,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -680,7 +684,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_top_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_top_drawer
     env_name: OpenTopDrawerCustomInScene-v0
@@ -694,7 +698,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -703,7 +707,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -712,7 +716,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -721,7 +725,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -735,7 +739,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -749,7 +753,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -763,7 +767,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_middle_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_middle_drawer
     env_name: OpenMiddleDrawerCustomInScene-v0
@@ -777,7 +781,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -786,7 +790,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -795,7 +799,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -804,7 +808,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -818,7 +822,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -832,7 +836,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -846,7 +850,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_open_bottom_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_open_bottom_drawer
     env_name: OpenBottomDrawerCustomInScene-v0
@@ -860,7 +864,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -869,7 +873,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -878,7 +882,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -887,7 +891,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -901,7 +905,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -915,7 +919,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -929,7 +933,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_top_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_top_drawer
     env_name: CloseTopDrawerCustomInScene-v0
@@ -943,7 +947,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -952,7 +956,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -961,7 +965,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -970,7 +974,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -984,7 +988,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -998,7 +1002,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -1012,7 +1016,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_middle_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_middle_drawer
     env_name: CloseMiddleDrawerCustomInScene-v0
@@ -1026,7 +1030,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_base
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1035,7 +1039,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_bg_bedroom
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1044,7 +1048,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_bg_office
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1053,7 +1057,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_light_bright
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1067,7 +1071,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_light_dark
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1081,7 +1085,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_cabinet_2
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1095,7 +1099,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: drawer_va_close_bottom_cabinet_3
-  episodes_per_task: 9
+  episodes_per_task: 5
   params:
     task_name: google_robot_close_bottom_drawer
     env_name: CloseBottomDrawerCustomInScene-v0
@@ -1109,7 +1113,7 @@ benchmarks:
     init_config: *id006
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_base
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1139,7 +1143,7 @@ benchmarks:
       - 3
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_bg_bedroom
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1148,7 +1152,7 @@ benchmarks:
     init_config: *id008
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_bg_office
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1157,7 +1161,7 @@ benchmarks:
     init_config: *id008
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_light_bright
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1172,7 +1176,7 @@ benchmarks:
     init_config: *id008
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_light_dark
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1187,7 +1191,7 @@ benchmarks:
     init_config: *id008
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_cabinet_2
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0
@@ -1202,7 +1206,7 @@ benchmarks:
     init_config: *id008
 - benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
   subname: put_in_drawer_va_cabinet_3
-  episodes_per_task: 27
+  episodes_per_task: 10
   params:
     task_name: google_robot_place_apple_in_closed_top_drawer
     env_name: PlaceIntoClosedTopDrawerCustomInScene-v0

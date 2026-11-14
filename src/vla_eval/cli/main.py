@@ -1058,15 +1058,26 @@ uv run vla-eval export-calibration --dev -o ../calibration_data/calib.npz
         help="With --rollout-dir, keep only episodes whose eval result was success.",
     )
     export_parser.add_argument(
+        "--group",
+        choices=("auto", "task", "prompt"),
+        default="auto",
+        help=(
+            "With --rollout-dir, outer quota unit. auto (default) picks task "
+            "or prompt from the data; task=task→prompt→phase; prompt=prompt→phase."
+        ),
+    )
+    export_parser.add_argument(
         "--num-samples",
         type=int,
-        default=30,
+        default=None,
         help=(
             "Output sample count; split evenly across 10 tasks and early/mid/late "
             "phases (chunk-grid + jitter teleport)."
         ),
     )
     export_parser.add_argument("--suite", default="libero_object")
+    export_parser.add_argument("--image-key", action="append", default=None)
+    export_parser.add_argument("--state-key", default="observation.state")
     export_parser.add_argument("--seed", type=int, default=7)
     export_parser.add_argument("--env-seed", type=int, default=None)
     export_parser.add_argument("--max-episodes-per-task", type=int, default=50)

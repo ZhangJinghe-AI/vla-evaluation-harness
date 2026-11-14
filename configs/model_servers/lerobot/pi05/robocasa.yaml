@@ -1,0 +1,25 @@
+# Native LeRobot pi0.5 — RoboCasa checkpoint (fair baseline vs phyAI).
+# Same weights as configs/model_servers/phyai/pi05/robocasa.yaml:
+#   /data/share/pi05_robocasa
+# Three cameras, 16-D state, 12-D action, chunk_size 50.
+# Reproducible episode noise uses the same seed-hash scheme as pi05-phyai.
+# PhyAI-only knobs (QVLA pack, flashinfer, CUDA graph, engine batching) are omitted.
+#
+# Isolated env: script requires Python >=3.12 (does not change harness 3.11).
+script: "./src/vla_eval/model_servers/pi05-lerobot.py"
+args:
+  checkpoint_path: "/data/share/pi05_robocasa"
+  device: "cuda"
+  dtype: "bfloat16"
+  reproducible: True
+  # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
+  # Ignored when noise_mode is random. Only applied when reproducible is true.
+  inference_seed: 30
+  noise_mode: "episode"
+  compile_model: False
+  chunk_size: 50
+  # Concurrent env clients are gathered into GPU batches of this size.
+  max_batch_size: 4
+  max_wait_time: 0.1
+  host: "0.0.0.0"
+  port: 8002

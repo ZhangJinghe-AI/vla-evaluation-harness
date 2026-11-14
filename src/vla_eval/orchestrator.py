@@ -314,6 +314,11 @@ class Orchestrator:
                         if cfg.throughput_mode and max_ep is not None:
                             episode_idx = ep % max_ep
                     task = {**task, "episode_idx": episode_idx}
+                    # Carry YAML BenchmarkConfig.subname into the task dict so
+                    # rollout filenames can disambiguate shared env task_names
+                    # (e.g. SimplerEnv Google VA variants).
+                    if cfg.subname and not task.get("subname"):
+                        task = {**task, "subname": cfg.subname}
                     run_kwargs: dict[str, Any] = {}
                     if rollout_recorder is not None:
                         run_kwargs["rollout_recorder"] = rollout_recorder

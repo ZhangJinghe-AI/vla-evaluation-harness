@@ -8,8 +8,8 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
 
+from vla_eval.calibration.lerobot import LeRobotExportConfig, export_lerobot_dataset
 from vla_eval.calibration.libero import LiberoExportConfig, export_libero_dataset
 
 logger = logging.getLogger(__name__)
@@ -44,16 +44,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --rollout-dir, keep only episodes whose eval result was success.",
     )
     parser.add_argument(
+        "--group",
+        choices=("auto", "task", "prompt"),
+        default="auto",
+        help=(
+            "With --rollout-dir, outer quota unit. auto (default) picks task "
+            "or prompt from the data; task=task→prompt→phase; prompt=prompt→phase."
+        ),
+    )
+    parser.add_argument(
         "--num-samples",
         type=int,
         default=None,
         help=(
             "Output sample count. Rollout export defaults to 120 and splits "
-            "task→prompt→phase, or prompt→phase when prompts cross task names. "
-            "LIBERO demo export defaults to 30."
+            "task→prompt→phase, or prompt→phase when prompts cross task names "
+            "(override with --group). LIBERO demo export defaults to 30."
         ),
     )
     parser.add_argument("--suite", default="libero_object")
+    parser.add_argument(
+        "--image-key",
+        action="append",
+        default=None,
+        help="LeRobot image feature to include; repeat to control camera order.",
+    )
+    parser.add_argument("--state-key", default="observation.state")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--env-seed", type=int, default=None)
     parser.add_argument("--max-tasks", type=int, default=None)
@@ -98,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _inside_docker() -> bool:
     return Path("/.dockerenv").exists()
+
+
+def _is_lerobot_dataset(dataset_dir: str | Path | None) -> bool:
+    if dataset_dir is None:
+        return False
+    root = Path(dataset_dir).expanduser().resolve()
+    return (root / "meta/info.json").is_file()
 
 
 def _resolve_harness_src() -> Path:
@@ -209,6 +232,7 @@ def _export_from_rollouts(args: argparse.Namespace) -> int:
         end_margin=args.end_margin,
         success_only=bool(getattr(args, "success_only", False)),
         state_dim=args.state_dim,
+        group=str(getattr(args, "group", "auto") or "auto"),
     )
     print(f"Exported {num_samples} samples to {out}")
     return 0
@@ -217,6 +241,19 @@ def _export_from_rollouts(args: argparse.Namespace) -> int:
 def run_export(args: argparse.Namespace) -> int:
     if not args.dataset_dir:
         raise ValueError("LIBERO export requires --dataset-dir, or pass --rollout-dir to sample saved rollouts.")
+    if _is_lerobot_dataset(args.dataset_dir):
+        if args.num_samples is None:
+            raise ValueError("LeRobot export requires --num-samples.")
+        cfg = LeRobotExportConfig(
+            dataset_dir=args.dataset_dir,
+            num_samples=args.num_samples,
+            seed=args.seed,
+            image_keys=tuple(args.image_key) if args.image_key else None,
+            state_key=args.state_key,
+        )
+        out = export_lerobot_dataset(args.output, config=cfg)
+        print(f"Exported {cfg.num_samples} samples to {out}")
+        return 0
     if args.benchmark != "libero":
         raise ValueError(f"Unsupported benchmark: {args.benchmark!r}")
     cfg = LiberoExportConfig(
@@ -244,6 +281,8 @@ def run_export(args: argparse.Namespace) -> int:
 def cmd_export_calibration(args: argparse.Namespace) -> None:
     if getattr(args, "rollout_dir", None):
         sys.exit(_export_from_rollouts(args))
+    if _is_lerobot_dataset(args.dataset_dir):
+        sys.exit(run_export(args))
     if not args.no_docker and not _inside_docker():
         _export_via_docker(args)
         return
@@ -254,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.rollout_dir:
         return _export_from_rollouts(args)
+    if _is_lerobot_dataset(args.dataset_dir):
+        return run_export(args)
     if not args.no_docker and not _inside_docker():
         _export_via_docker(args)
         return 0

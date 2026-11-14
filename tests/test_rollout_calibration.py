@@ -55,6 +55,42 @@ def test_rollout_write_error_does_not_raise(tmp_path):
     assert len(list(rollout_dir.glob("*.npz"))) == 1
 
 
+def test_rollout_subname_disambiguates_shared_task_name(tmp_path):
+    """Google-style VA variants share env task_name but differ by subname."""
+    rollout_dir = tmp_path / "rollouts"
+    recorder = RolloutRecorder(rollout_dir)
+    for subname in ("move_near_va_base", "move_near_va_light_dark"):
+        for step in range(4):
+            recorder.note(_obs(step, "move sponge near apple"))
+        recorder.flush(
+            {
+                "name": "google_robot_move_near",
+                "subname": subname,
+                "episode_idx": 0,
+            },
+            success=True,
+        )
+    recorder.finish()
+
+    paths = sorted(p.name for p in rollout_dir.glob("*.npz"))
+    assert paths == [
+        "google_robot_move_near__move_near_va_base_ep0000_success.npz",
+        "google_robot_move_near__move_near_va_light_dark_ep0000_success.npz",
+    ]
+    metas = [
+        json.loads(p.read_text())
+        for p in sorted(rollout_dir.glob("*.meta.json"), key=lambda p: p.name)
+    ]
+    assert [m["subname"] for m in metas] == [
+        "move_near_va_base",
+        "move_near_va_light_dark",
+    ]
+    assert all(m["task_name"] == "google_robot_move_near" for m in metas)
+
+    with np.load(rollout_dir / paths[0], allow_pickle=True) as data:
+        assert str(data["subname"]) == "move_near_va_base"
+
+
 def test_rollout_sampling_keeps_native_camera_keys(tmp_path):
     rollout_dir = tmp_path / "rollouts"
     _write_episode(rollout_dir, "task_a", 0, success=True)
@@ -301,6 +337,42 @@ def test_task_quota_is_not_split_flat_across_prompts(tmp_path):
     alpha = {name: count for name, count in counts.items() if name != "only"}
     assert sum(alpha.values()) == 2
     assert all(count == 1 for count in alpha.values())
+
+
+def test_force_group_prompt_splits_across_all_prompts(tmp_path):
+    """``group=prompt`` ignores task boundaries and budgets every language."""
+    rollout_dir = tmp_path / "rollouts"
+    recorder = RolloutRecorder(rollout_dir)
+    for step in range(30):
+        recorder.note(_obs(step, "only"))
+    recorder.flush({"name": "beta", "episode_idx": 0}, success=True)
+    for episode_idx, prompt in enumerate(("p0", "p1", "p2", "p3")):
+        for step in range(30):
+            recorder.note(_obs(step, prompt))
+        recorder.flush({"name": "alpha", "episode_idx": episode_idx}, success=True)
+    recorder.finish()
+
+    output = tmp_path / "calib.npz"
+    export_rollout_calibration(
+        rollout_dir,
+        output,
+        num_samples=5,
+        seed=0,
+        chunk_size=10,
+        jitter=0,
+        end_margin=0,
+        group="prompt",
+    )
+    with np.load(output, allow_pickle=True) as data:
+        counts: dict[str, int] = {}
+        for text in data["task_descriptions"].tolist():
+            counts[str(text)] = counts.get(str(text), 0) + 1
+        meta = json.loads(str(data["meta_json"]))
+    assert meta["group"] == "prompt"
+    assert meta["num_prompts"] == 5
+    assert sum(counts.values()) == 5
+    assert set(counts) == {"only", "p0", "p1", "p2", "p3"}
+    assert all(count == 1 for count in counts.values())
 
 
 def test_shared_prompts_ignore_task_name(tmp_path):

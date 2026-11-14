@@ -6,15 +6,18 @@ Layout::
     sampling.py — shared chunk-grid / phase quota helpers
     rollout.py  — FP eval rollouts → calib (all benchmarks)
     libero.py   — legacy LIBERO demo HDF5 replay → calib
+    lerobot.py  — generic local LeRobot dataset → naive random-frame calib
 """
 
 from vla_eval.calibration.format import CALIBRATION_FILE_VERSION, save_calibration_dataset
+from vla_eval.calibration.lerobot import export_lerobot_dataset
 from vla_eval.calibration.libero import export_libero_dataset
 from vla_eval.calibration.rollout import RolloutRecorder, export_rollout_calibration
 
 __all__ = [
     "CALIBRATION_FILE_VERSION",
     "RolloutRecorder",
+    "export_lerobot_dataset",
     "export_libero_dataset",
     "export_rollout_calibration",
     "save_calibration_dataset",
