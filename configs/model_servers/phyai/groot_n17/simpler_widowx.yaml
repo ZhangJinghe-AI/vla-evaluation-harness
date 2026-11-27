@@ -12,7 +12,7 @@ args:
   state_layout: "simpler_widowx"
   invert_gripper: False
   processor_model_name_or_path: "/data/share/Cosmos-Reason2-2B"
-  qvla_pack_path: "/data/share/qvla-packs-v1/grootn17_simpler_widowx-c8-s0-W4A4_mxfpxmxfp-cal_v2-ns128-llm_pipeline_clip_smooth-clip_mean_3std_image_mask_median_amax_005-smooth_alpha_05-dit_pipeline_clip_smooth-clip_mean_3std_all_output_budget_1e3_gc_b4-smooth_alpha_05-mxfp4_e2m1_max-test1.pt"
+  qvla_pack_path: "/data/share/qvla-packs-v1/grootn17_simpler_widowx_vm-chunksize8-seed100-reproducible_noise-W4A4_intxint-cal_rollout_prompt_v3-ns128-k1-llm_pipeline_smooth-smooth_alpha_07-dit_pipeline_smooth-smooth_alpha_07-test1.pt"
   device: "cuda"
   params_dtype: "bfloat16"
   use_differentiable_forward: False
@@ -30,4 +30,4 @@ args:
   chunk_size: 8
   max_wait_time: 0.1
   host: "0.0.0.0"
-  port: 8002
+  port: 8004

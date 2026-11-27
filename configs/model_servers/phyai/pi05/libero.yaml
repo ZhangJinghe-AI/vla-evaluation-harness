@@ -34,7 +34,7 @@ args:
   reproducible: True
   # Base seed for global/episode noise: hash(inference_seed, task_id, episode_idx, step).
   # Ignored when noise_mode is random. Only applied when reproducible is true.
-  inference_seed: 20
+  inference_seed: 30
   # random = fresh OS-entropy noise; global = one fixed noise; episode = per-episode hash.
   noise_mode: "episode"
   use_cuda_graph: True

@@ -463,19 +463,25 @@ def _google_robot_paper_family(bench_name: str) -> tuple[str, str] | None:
     return None
 
 
-def _print_vm_va_averages(con: Any, suite_rows: list[tuple[str, float, int, int, int]]) -> float | None:
-    """Print Google Robot paper-task VM/VA macros when both protocols are present.
+def _print_vm_va_averages(
+    con: Any, suite_rows: list[tuple[str, float, int, int, int]]
+) -> tuple[float, int] | None:
+    """Print Google Robot paper-task macros for VM-only, VA-only, or mixed runs.
 
-    Layout:
+    Layout (only present protocols are printed):
       VM — 4 task rates, then VM macro average
       VA — 4 task rates, then VA macro average
-      VM+VA macro average
+      mixed → Overall is mean of the two protocol macros
 
     Within each paper task, episodes are pooled (open+close drawer, all VA
     variants). Across the 4 tasks, averages are unweighted macros so VA's many
-    variants do not dominate. Returns the VM+VA macro rate for the Overall line,
-    or ``None`` when this run is not a mixed Google VM+VA suite (caller keeps
-    episode-weighted overall).
+    variants do not dominate.
+
+    Returns ``(overall_rate, n_macro_units)`` for the Overall line:
+      - VM-only or VA-only: that protocol's 4-task macro, ``n=len(rates)``
+      - mixed VM+VA: mean of the two protocol macros, ``n=2``
+      - ``None`` when this is not a Google paper-task suite (caller keeps
+        episode-weighted overall).
     """
     buckets: dict[tuple[str, str], list[tuple[str, float, int, int, int]]] = {}
     for row in suite_rows:
@@ -486,7 +492,7 @@ def _print_vm_va_averages(con: Any, suite_rows: list[tuple[str, float, int, int,
 
     vm_has = any(("vm", key) in buckets for key, _ in _GOOGLE_PAPER_TASKS)
     va_has = any(("va", key) in buckets for key, _ in _GOOGLE_PAPER_TASKS)
-    if not vm_has or not va_has:
+    if not vm_has and not va_has:
         # Fallback: episode-weighted VM/VA split for mixed runs that are not
         # the Google paper 4-task set.
         vm = [row for row in suite_rows if "_va" not in row[0]]
@@ -512,7 +518,12 @@ def _print_vm_va_averages(con: Any, suite_rows: list[tuple[str, float, int, int,
 
     con.print(f"{'─' * 60}")
     protocol_macros: list[float] = []
+    last_task_count = 0
     for protocol, section in (("vm", "VM"), ("va", "VA")):
+        if protocol == "vm" and not vm_has:
+            continue
+        if protocol == "va" and not va_has:
+            continue
         con.print(f"  [bold]{section} (paper 4-task)[/bold]")
         rates: list[float] = []
         for key, label in _GOOGLE_PAPER_TASKS:
@@ -526,14 +537,17 @@ def _print_vm_va_averages(con: Any, suite_rows: list[tuple[str, float, int, int,
         if rates:
             macro = sum(rates) / len(rates)
             protocol_macros.append(macro)
+            last_task_count = len(rates)
             _print_macro_rate_line(con, f"{section} average", macro, len(rates))
         else:
             con.print(f"  {section + ' average':40s} [dim]   n/a[/dim]")
         con.print(f"{'─' * 60}")
 
-    if len(protocol_macros) != 2:
+    if not protocol_macros:
         return None
-    return sum(protocol_macros) / 2.0
+    if len(protocol_macros) == 1:
+        return protocol_macros[0], last_task_count
+    return sum(protocol_macros) / 2.0, 2
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
@@ -606,8 +620,10 @@ def cmd_merge(args: argparse.Namespace) -> None:
             paper_overall = _print_vm_va_averages(con, suite_rows)
             con.print(f"{'─' * 60}")
             if paper_overall is not None:
-                # Google VM+VA: Overall = mean of the two protocol macros.
-                _print_macro_rate_line(con, "Overall average", paper_overall, 2)
+                # Google paper suite: Overall is 4-task macro (VM- or VA-only)
+                # or mean of the two protocol macros (mixed VM+VA).
+                rate, n_units = paper_overall
+                _print_macro_rate_line(con, "Overall average", rate, n_units)
             else:
                 _print_rate_line(
                     con,

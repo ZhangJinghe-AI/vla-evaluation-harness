@@ -1,53 +1,43 @@
-# SimplerEnv evaluation — Google Robot Visual Matching (4 paper tasks).
-# Pick Coke Can, Move Near, Open/Close Drawer, Place Apple.
-# Place Apple uses google_robot_place_apple_in_closed_top_drawer (official
-# paper subtask of place_in_closed_drawer). pick_object is not in that set.
-# N1.7 server: configs/model_servers/phyai/groot_n17/simpler_google.yaml
-# 100 eps/task (was 24) to cut seed-to-seed binomial noise on mid-SR tasks,
-# except move_near=60 (only 60 object-init triplets in MoveNearInScene).
+# Google Robot Fractal: Visual Matching (VM) only.
+# Split from google_robot_all.yaml — server/docker/benchmark entries unchanged.
+# Paper 4-task set: Pick Coke Can, Move Near, Open/Close Drawer, Place Apple.
+# VM Place Apple is google_robot_place_apple_in_closed_top_drawer.
+# pick_object is omitted.
+# VM budget: 100 eps/task, except move_near=60 (only 60 init triplets).
 server:
-  url: "ws://localhost:8004"
+  url: ws://localhost:8004
   timeout: 120.0
-
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
-  gpus: "0,1,4"
+  gpus: 3,4,5
   env:
-    - "NVIDIA_DRIVER_CAPABILITIES=all"
+  - NVIDIA_DRIVER_CAPABILITIES=all
   volumes:
-    - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro"
-
-output_dir: "./results_simpler_google_robot_vm"
-
+  - /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro
+output_dir: ./results_simpler_google_robot_vm
 benchmarks:
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: pick_coke_can
-    episodes_per_task: 100
-    params:
-      task_name: "google_robot_pick_coke_can"
-
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: move_near
-    # Cap at 60: MoveNearInScene only has 60 object-init triplets; higher
-    # episode_id raises IndexError and is counted as harness failure.
-    episodes_per_task: 60
-    params:
-      task_name: "google_robot_move_near"
-
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: open_drawer
-    episodes_per_task: 100
-    params:
-      task_name: "google_robot_open_drawer"
-
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: close_drawer
-    episodes_per_task: 100
-    params:
-      task_name: "google_robot_close_drawer"
-
-  - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
-    subname: place_apple_in_closed_top_drawer
-    episodes_per_task: 100
-    params:
-      task_name: "google_robot_place_apple_in_closed_top_drawer"
+- benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
+  subname: pick_coke_can
+  episodes_per_task: 100
+  params:
+    task_name: google_robot_pick_coke_can
+- benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
+  subname: move_near
+  episodes_per_task: 60
+  params:
+    task_name: google_robot_move_near
+- benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
+  subname: open_drawer
+  episodes_per_task: 100
+  params:
+    task_name: google_robot_open_drawer
+- benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
+  subname: close_drawer
+  episodes_per_task: 100
+  params:
+    task_name: google_robot_close_drawer
+- benchmark: vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark
+  subname: place_apple_in_closed_top_drawer
+  episodes_per_task: 100
+  params:
+    task_name: google_robot_place_apple_in_closed_top_drawer

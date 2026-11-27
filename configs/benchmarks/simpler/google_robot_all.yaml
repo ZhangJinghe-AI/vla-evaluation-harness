@@ -12,7 +12,7 @@ server:
   timeout: 120.0
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
-  gpus: "0,1,4"
+  gpus: "3,4,5"
   env:
   - NVIDIA_DRIVER_CAPABILITIES=all
   volumes:

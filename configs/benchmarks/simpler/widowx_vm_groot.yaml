@@ -4,11 +4,11 @@
 # 100 eps reduces binomial noise on mid-success tasks across inference seeds.
 extends: widowx_vm.yaml
 server:
-  url: "ws://localhost:8002"
+  url: "ws://localhost:8004"
   timeout: 120.0
 docker:
   image: ghcr.io/allenai/vla-evaluation-harness/simpler-groot:latest
-  gpus: "0,1,4"
+  gpus: "3,4,5"
 benchmarks:
   - benchmark: "vla_eval.benchmarks.simpler.benchmark:SimplerEnvBenchmark"
     subname: stack_green_cube
